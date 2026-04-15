@@ -79,3 +79,18 @@ func IsNotFound(err error) bool {
 func IsRateLimited(err error) bool {
 	return errors.Is(err, ErrRateLimited)
 }
+
+// IsForbidden checks if the error is a forbidden error
+func IsForbidden(err error) bool {
+	return errors.Is(err, ErrForbidden)
+}
+
+// IsConflict checks if the error is a conflict error
+func IsConflict(err error) bool {
+	return errors.Is(err, ErrConflict)
+}
+
+// IsInternalServer checks if the error is an internal server error
+func IsInternalServer(err error) bool {
+	return errors.Is(err, ErrInternalServer)
+}
