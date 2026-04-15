@@ -1,0 +1,19 @@
+name: Go Modules
+
+on:
+  create:
+    tags:
+    - 'v*'
+
+jobs:
+  notify-proxy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify Go module proxy
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Notifying Go module proxy of new tag: $TAG"
+          # Trigger Go proxy to fetch and index the new version
+          curl -sS "https://proxy.golang.org/github.com/glennprays/whatsapp-gateway-sdk-go/@v/${TAG}.info"
+          echo "Go module proxy notification complete"
