@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `GetIncomingMessages(ctx, limit)` to fetch the most recent inbound messages
+  buffered by the gateway, newest first. Paired with new types `IncomingMessage`
+  and `IncomingMessagesResponse` mirroring the webhook payload vocabulary.
+
+### Known limitations
+- `IncomingMessage.Media.Url` is not populated by the `/message/incoming`
+  endpoint; only metadata (type, mime type, size, filename, caption) is
+  returned. Use webhooks for fetchable URLs.
+- `doRequest` does not yet propagate an `X-Trace-ID` header; the gateway
+  generates one on receipt. End-to-end trace correlation will land in a
+  follow-up release.
+
 ## [0.0.1] - 2026-04-16
 
 ### Added

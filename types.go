@@ -184,6 +184,46 @@ type IncomingWebhookPayload struct {
 	Media *IncomingMessageMediaInfo `json:"media,omitempty"`
 }
 
+// IncomingMessage represents a single received message returned by the
+// GET /message/incoming endpoint. Field names mirror IncomingWebhookPayload
+// (minus the Event envelope) so consumers see a consistent vocabulary across
+// the webhook delivery and the polled inbox.
+type IncomingMessage struct {
+	// MessageId is the unique identifier for the message
+	MessageId string `json:"message_id"`
+	// Chat is the chat ID where the message was received
+	Chat string `json:"chat"`
+	// From is the sender's phone number in WhatsApp JID format
+	From string `json:"from"`
+	// IsGroup indicates whether the message was received in a group chat
+	IsGroup bool `json:"is_group"`
+	// PushName is the display name of the sender
+	PushName string `json:"push_name"`
+	// Timestamp is the Unix timestamp when the message was received
+	Timestamp int `json:"timestamp"`
+	// Text is the text content of the message (for text messages)
+	Text string `json:"text,omitempty"`
+	// Type is the message type (text, image, video, audio, or document)
+	Type IncomingMessageType `json:"type"`
+	// Media contains media metadata for non-text messages.
+	// Note: Url is not populated by /message/incoming in v1; only Type, MimeType,
+	// Size, Filename, and Caption are filled. Use webhooks for media URLs.
+	Media *IncomingMessageMediaInfo `json:"media,omitempty"`
+}
+
+// IncomingMessagesResponse represents the response from the
+// GET /message/incoming endpoint. Messages are sorted newest first.
+type IncomingMessagesResponse struct {
+	// Success indicates the request completed successfully
+	Success bool `json:"success"`
+	// Timestamp is the Unix milliseconds when the response was generated
+	Timestamp int64 `json:"timestamp"`
+	// Count is the number of messages returned (<= requested limit)
+	Count int `json:"count"`
+	// Messages is the list of incoming messages, newest first
+	Messages []IncomingMessage `json:"messages"`
+}
+
 // ErrorResponse represents an error response from the API.
 type ErrorResponse struct {
 	// Error is a human-readable error message

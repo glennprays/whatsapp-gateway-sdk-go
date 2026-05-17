@@ -356,6 +356,27 @@ func (c *Client) React(ctx context.Context, msisdn, messageID, emoji string) err
 	return c.doRequest(ctx, http.MethodPost, "/message/react", reqBody, &resp, true)
 }
 
+// GetIncomingMessages fetches the most recent incoming messages buffered by the
+// gateway for the authenticated session, newest first.
+//
+// The limit parameter caps the number of messages returned. If limit <= 0, the
+// gateway substitutes its default (10). Values above the gateway's maximum (50)
+// are clamped server-side.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetIncomingMessages(ctx context.Context, limit int) (*IncomingMessagesResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/message/incoming?limit=%d", limit)
+	var resp IncomingMessagesResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // RegisterWebhook registers a URL to receive webhook events.
 // Webhooks allow you to receive real-time notifications for incoming and outgoing messages.
 //
