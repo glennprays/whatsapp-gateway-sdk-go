@@ -1733,3 +1733,123 @@ func TestDoRequest_RequireAuthWithoutToken(t *testing.T) {
 		t.Errorf("expected ErrNotAuthenticated, got %v", err)
 	}
 }
+
+func TestGetIncomingMessages_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/incoming" {
+			t.Errorf("expected path /api/v1/message/incoming, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if got := r.URL.Query().Get("limit"); got != "5" {
+			t.Errorf("expected limit=5, got %s", got)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-token" {
+			t.Errorf("expected Authorization Bearer test-token, got %s", auth)
+		}
+
+		resp := IncomingMessagesResponse{
+			Success:   true,
+			Timestamp: 1715900000000,
+			Count:     2,
+			Messages: []IncomingMessage{
+				{
+					MessageId: "MSG_2",
+					Chat:      "6281234567890@s.whatsapp.net",
+					From:      "6281234567890@s.whatsapp.net",
+					IsGroup:   false,
+					PushName:  "Google",
+					Timestamp: 1715899950,
+					Text:      "Your code is 123456",
+					Type:      IncomingMessageTypeText,
+				},
+				{
+					MessageId: "MSG_1",
+					Chat:      "6281234567890@s.whatsapp.net",
+					From:      "6281234567890@s.whatsapp.net",
+					IsGroup:   false,
+					PushName:  "Alice",
+					Timestamp: 1715899900,
+					Type:      IncomingMessageTypeImage,
+					Media: &IncomingMessageMediaInfo{
+						Type:     IncomingMessageTypeImage,
+						MimeType: "image/jpeg",
+						Size:     12345,
+						Caption:  "look at this",
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL + "/api/v1"))
+	client.SetToken("test-token")
+
+	resp, err := client.GetIncomingMessages(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success=true")
+	}
+	if resp.Count != 2 {
+		t.Errorf("expected count=2, got %d", resp.Count)
+	}
+	if len(resp.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(resp.Messages))
+	}
+	if resp.Messages[0].MessageId != "MSG_2" {
+		t.Errorf("expected newest-first ordering, got %s", resp.Messages[0].MessageId)
+	}
+	if resp.Messages[1].Media == nil || resp.Messages[1].Media.MimeType != "image/jpeg" {
+		t.Errorf("expected media.mime_type=image/jpeg on second message")
+	}
+}
+
+func TestGetIncomingMessages_NotAuthenticated(t *testing.T) {
+	client := NewClient(WithBaseURL("http://localhost:9999/api/v1"))
+	_, err := client.GetIncomingMessages(context.Background(), 10)
+	if err != ErrNotAuthenticated {
+		t.Errorf("expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
+func TestGetIncomingMessages_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := IncomingMessagesResponse{Success: true, Timestamp: 1, Count: 0, Messages: []IncomingMessage{}}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL + "/api/v1"))
+	client.SetToken("test-token")
+
+	resp, err := client.GetIncomingMessages(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Count != 0 || len(resp.Messages) != 0 {
+		t.Errorf("expected empty response, got count=%d len=%d", resp.Count, len(resp.Messages))
+	}
+}
+
+func TestGetIncomingMessages_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": "client not logged in"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL + "/api/v1"))
+	client.SetToken("test-token")
+
+	_, err := client.GetIncomingMessages(context.Background(), 10)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
