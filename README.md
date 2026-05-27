@@ -182,6 +182,46 @@ if err != nil {
 fmt.Println("Message ID:", resp.MessageId)
 ```
 
+### Location Message
+
+```go
+resp, err := client.SendLocation(ctx, recipient, -6.2088, 106.8456, "Jakarta", "Jakarta, Indonesia")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
+### Poll Message
+
+```go
+options := []string{"Red", "Green", "Blue"}
+
+// selectableCount limits how many options a user can select (0 = no limit)
+resp, err := client.SendPoll(ctx, recipient, "What is your favorite color?", options, 1)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
+### Sticker Message
+
+```go
+// Open sticker file (WebP format)
+file, err := os.Open("sticker.webp")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+resp, err := client.SendSticker(ctx, recipient, file)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
 ### Edit Message
 
 ```go
