@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   buffered by the gateway, newest first. Paired with new types `IncomingMessage`
   and `IncomingMessagesResponse` mirroring the webhook payload vocabulary.
 
+## [0.1.0] - 2026-05-28
+
+### Added
+- `SendLocation` method for sending location messages with coordinates
+- `SendPoll` method for sending poll messages with question and options
+- `SendSticker` method for sending sticker messages
+
 ### Known limitations
 - `IncomingMessage.Media.Url` is not populated by the `/message/incoming`
   endpoint; only metadata (type, mime type, size, filename, caption) is

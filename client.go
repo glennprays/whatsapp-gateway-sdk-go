@@ -291,6 +291,133 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	return &result, nil
 }
 
+// SendLocation sends a location message to the specified recipient.
+//
+// The msisdn parameter should be the recipient's phone number in WhatsApp JID format.
+// The latitude and longitude specify the geographic coordinates.
+// The name and address parameters are optional metadata for the location pin.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, longitude float64, name, address string) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	reqBody := SendLocationMessageRequest{
+		Msisdn:    msisdn,
+		Latitude:  latitude,
+		Longitude: longitude,
+		Name:      name,
+		Address:   address,
+	}
+
+	var resp SendMessageResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/message/location", reqBody, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SendPoll sends a poll message to the specified recipient.
+//
+// The msisdn parameter should be the recipient's phone number in WhatsApp JID format.
+// The question is the poll question text, and options is the list of answer choices.
+// The selectableCount limits how many options a user can select (0 means no limit).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options []string, selectableCount int) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	reqBody := SendPollMessageRequest{
+		Msisdn:          msisdn,
+		Question:        question,
+		Options:         options,
+		SelectableCount: selectableCount,
+	}
+
+	var resp SendMessageResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/message/poll", reqBody, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SendSticker sends a sticker message to the specified recipient.
+//
+// The msisdn parameter should be the recipient's phone number in WhatsApp JID format.
+// The sticker parameter is an io.Reader containing the sticker data (WebP format).
+//
+// Example:
+//
+//	file, _ := os.Open("sticker.webp")
+//	defer file.Close()
+//	resp, err := client.SendSticker(ctx, msisdn, file)
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Reader) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	// Build multipart form
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Add msisdn field
+	if err := writer.WriteField("msisdn", msisdn); err != nil {
+		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+
+	// Add sticker file
+	part, err := writer.CreateFormFile("sticker", "sticker.webp")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sticker form file: %w", err)
+	}
+	if _, err := io.Copy(part, sticker); err != nil {
+		return nil, fmt.Errorf("failed to copy sticker data: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	// Create request
+	url := c.baseURL + "/message/sticker"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("User-Agent", c.userAgent)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(body, resp.StatusCode)
+	}
+
+	var result SendMessageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // EditMessage edits a previously sent message.
 // It replaces the message content with newMessage.
 //

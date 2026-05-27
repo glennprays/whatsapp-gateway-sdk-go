@@ -935,6 +935,221 @@ func TestSendImage_MultipartFormValidation(t *testing.T) {
 	}
 }
 
+// TestSendLocation_Success tests successful location send
+func TestSendLocation_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/location" {
+			t.Errorf("expected path /api/v1/message/location, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("expected Authorization header 'Bearer test-token', got %s", r.Header.Get("Authorization"))
+		}
+
+		var reqBody SendLocationMessageRequest
+		json.NewDecoder(r.Body).Decode(&reqBody)
+		if reqBody.Msisdn != "6281234567890@s.whatsapp.net" {
+			t.Errorf("expected msisdn '6281234567890@s.whatsapp.net', got '%s'", reqBody.Msisdn)
+		}
+		if reqBody.Latitude != -6.2088 {
+			t.Errorf("expected latitude -6.2088, got %f", reqBody.Latitude)
+		}
+		if reqBody.Longitude != 106.8456 {
+			t.Errorf("expected longitude 106.8456, got %f", reqBody.Longitude)
+		}
+		if reqBody.Name != "Jakarta" {
+			t.Errorf("expected name 'Jakarta', got '%s'", reqBody.Name)
+		}
+		if reqBody.Address != "Jakarta, Indonesia" {
+			t.Errorf("expected address 'Jakarta, Indonesia', got '%s'", reqBody.Address)
+		}
+
+		resp := SendMessageResponse{Success: true, MessageId: "loc_123"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+
+	resp, err := client.SendLocation(context.Background(), "6281234567890@s.whatsapp.net", -6.2088, 106.8456, "Jakarta", "Jakarta, Indonesia")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+	if resp.MessageId != "loc_123" {
+		t.Errorf("expected message ID 'loc_123', got '%s'", resp.MessageId)
+	}
+}
+
+// TestSendLocation_NotAuthenticated tests location send without authentication
+func TestSendLocation_NotAuthenticated(t *testing.T) {
+	client := NewClient() // No token set
+	_, err := client.SendLocation(context.Background(), "6281234567890@s.whatsapp.net", -6.2088, 106.8456, "", "")
+
+	if err != ErrNotAuthenticated {
+		t.Errorf("expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
+// TestSendPoll_Success tests successful poll send
+func TestSendPoll_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/poll" {
+			t.Errorf("expected path /api/v1/message/poll, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("expected Authorization header 'Bearer test-token', got %s", r.Header.Get("Authorization"))
+		}
+
+		var reqBody SendPollMessageRequest
+		json.NewDecoder(r.Body).Decode(&reqBody)
+		if reqBody.Msisdn != "6281234567890@s.whatsapp.net" {
+			t.Errorf("expected msisdn '6281234567890@s.whatsapp.net', got '%s'", reqBody.Msisdn)
+		}
+		if reqBody.Question != "What is your favorite color?" {
+			t.Errorf("expected question 'What is your favorite color?', got '%s'", reqBody.Question)
+		}
+		if len(reqBody.Options) != 3 {
+			t.Errorf("expected 3 options, got %d", len(reqBody.Options))
+		}
+		if reqBody.SelectableCount != 1 {
+			t.Errorf("expected selectable_count 1, got %d", reqBody.SelectableCount)
+		}
+
+		resp := SendMessageResponse{Success: true, MessageId: "poll_123"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+
+	resp, err := client.SendPoll(context.Background(), "6281234567890@s.whatsapp.net", "What is your favorite color?", []string{"Red", "Green", "Blue"}, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+	if resp.MessageId != "poll_123" {
+		t.Errorf("expected message ID 'poll_123', got '%s'", resp.MessageId)
+	}
+}
+
+// TestSendPoll_NotAuthenticated tests poll send without authentication
+func TestSendPoll_NotAuthenticated(t *testing.T) {
+	client := NewClient() // No token set
+	_, err := client.SendPoll(context.Background(), "6281234567890@s.whatsapp.net", "Q?", []string{"A", "B"}, 0)
+
+	if err != ErrNotAuthenticated {
+		t.Errorf("expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
+// TestSendSticker_Success tests successful sticker send
+func TestSendSticker_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/sticker" {
+			t.Errorf("expected path /api/v1/message/sticker, got %s", r.URL.Path)
+		}
+
+		// Parse multipart form to verify fields
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Errorf("failed to parse multipart form: %v", err)
+		}
+
+		if r.FormValue("msisdn") != "6281234567890@s.whatsapp.net" {
+			t.Errorf("expected msisdn '6281234567890@s.whatsapp.net', got '%s'", r.FormValue("msisdn"))
+		}
+
+		// Verify content type is multipart
+		contentType := r.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "multipart/form-data") {
+			t.Errorf("expected multipart content type, got '%s'", contentType)
+		}
+
+		// Verify authorization header
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("expected Authorization header, got '%s'", r.Header.Get("Authorization"))
+		}
+
+		resp := SendMessageResponse{Success: true, MessageId: "stk_123"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+
+	stickerData := []byte("fake sticker data")
+	sticker := &mockImageReader{data: stickerData}
+
+	resp, err := client.SendSticker(context.Background(), "6281234567890@s.whatsapp.net", sticker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+	if resp.MessageId != "stk_123" {
+		t.Errorf("expected message ID 'stk_123', got '%s'", resp.MessageId)
+	}
+}
+
+// TestSendSticker_NotAuthenticated tests sticker send without authentication
+func TestSendSticker_NotAuthenticated(t *testing.T) {
+	client := NewClient() // No token set
+	stickerData := []byte("test sticker")
+	sticker := &mockImageReader{data: stickerData}
+
+	_, err := client.SendSticker(context.Background(), "6281234567890@s.whatsapp.net", sticker)
+	if err != ErrNotAuthenticated {
+		t.Errorf("expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
+// TestSendSticker_InvalidSticker tests sticker send with read failure
+func TestSendSticker_InvalidSticker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := SendMessageResponse{Success: true, MessageId: "stk_error"}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+
+	sticker := &errorReader{err: io.ErrUnexpectedEOF}
+
+	_, err := client.SendSticker(context.Background(), "6281234567890@s.whatsapp.net", sticker)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to copy sticker data") {
+		t.Errorf("expected sticker copy error, got %v", err)
+	}
+}
+
 // TestEditMessage_Success tests successful message edit
 func TestEditMessage_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
