@@ -58,6 +58,32 @@ type SendMessageResponse struct {
 	MessageId string `json:"message_id"`
 }
 
+// SendLocationMessageRequest represents a request to send a location message.
+type SendLocationMessageRequest struct {
+	// Msisdn is the recipient's phone number in WhatsApp JID format
+	Msisdn string `json:"msisdn"`
+	// Latitude is the geographic latitude of the location
+	Latitude float64 `json:"latitude"`
+	// Longitude is the geographic longitude of the location
+	Longitude float64 `json:"longitude"`
+	// Name is the optional name of the location
+	Name string `json:"name,omitempty"`
+	// Address is the optional address of the location
+	Address string `json:"address,omitempty"`
+}
+
+// SendPollMessageRequest represents a request to send a poll message.
+type SendPollMessageRequest struct {
+	// Msisdn is the recipient's phone number in WhatsApp JID format
+	Msisdn string `json:"msisdn"`
+	// Question is the poll question text
+	Question string `json:"question"`
+	// Options is the list of poll options
+	Options []string `json:"options"`
+	// SelectableCount is the optional maximum number of options a user can select
+	SelectableCount int `json:"selectable_count,omitempty"`
+}
+
 // MessageDeleteRequest represents a request to delete a previously sent message.
 type MessageDeleteRequest struct {
 	// MessageId is the ID of the message to delete
