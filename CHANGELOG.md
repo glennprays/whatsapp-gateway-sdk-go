@@ -5,12 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-06-08
 
 ### Added
 - `GetIncomingMessages(ctx, limit)` to fetch the most recent inbound messages
   buffered by the gateway, newest first. Paired with new types `IncomingMessage`
   and `IncomingMessagesResponse` mirroring the webhook payload vocabulary.
+- `GetJobStatus(ctx, jobID)` to poll the status of asynchronously queued
+  message jobs (gateway queue mode returns `202` with a `job_id`). Paired
+  with the new `JobStatusResponse` type.
+- `WithTraceID(ctx, id)` context helper: every request made with the
+  returned context sends the ID in the `X-Trace-ID` header for end-to-end
+  trace correlation with gateway logs. Closes the trace propagation
+  limitation noted in 0.1.0.
+
+### Fixed
+- Data race on the client token: `SetToken`/`Register` could write the
+  token while concurrent requests read it. Token access is now guarded by
+  a `sync.RWMutex`, matching the documented "safe for concurrent use"
+  guarantee.
 
 ## [0.1.0] - 2026-05-28
 
