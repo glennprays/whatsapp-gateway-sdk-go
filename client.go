@@ -273,6 +273,9 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -400,6 +403,9 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -613,6 +619,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	if requireAuth {
 		token := c.GetToken()
