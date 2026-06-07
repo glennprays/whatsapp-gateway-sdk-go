@@ -66,7 +66,7 @@ func WithTimeout(timeout time.Duration) Option {
 //	client := waga.NewClient(waga.WithToken("your-jwt-token"))
 func WithToken(token string) Option {
 	return func(c *Client) {
-		c.token = token
+		c.SetToken(token)
 	}
 }
 

@@ -3,10 +3,12 @@ package waga
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -2066,5 +2068,81 @@ func TestGetIncomingMessages_ServerError(t *testing.T) {
 	_, err := client.GetIncomingMessages(context.Background(), 10)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClient_ConcurrentTokenAccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"authenticated":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL), WithToken("initial"))
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(3)
+		go func(i int) {
+			defer wg.Done()
+			client.SetToken(fmt.Sprintf("token-%d", i))
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = client.GetToken()
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = client.GetLoginStatus(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	if client.GetToken() == "" {
+		t.Error("token must not be empty after concurrent updates")
+	}
+}
+
+func TestGetJobStatus(t *testing.T) {
+	messageID := "3EB0ABC123"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/job/job-123" {
+			t.Errorf("expected path /api/v1/message/job/job-123, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-token" {
+			t.Errorf("expected bearer token, got %q", auth)
+		}
+
+		resp := JobStatusResponse{
+			JobID:     "job-123",
+			Status:    "completed",
+			MessageID: &messageID,
+			CreatedAt: "2026-06-08T00:00:00Z",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.GetJobStatus(context.Background(), "job-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Errorf("expected status completed, got %s", resp.Status)
+	}
+	if resp.MessageID == nil || *resp.MessageID != messageID {
+		t.Errorf("expected message ID %s, got %v", messageID, resp.MessageID)
+	}
+}
+
+func TestGetJobStatus_RequiresAuth(t *testing.T) {
+	client := NewClient()
+	if _, err := client.GetJobStatus(context.Background(), "job-123"); err != ErrNotAuthenticated {
+		t.Errorf("expected ErrNotAuthenticated, got %v", err)
 	}
 }

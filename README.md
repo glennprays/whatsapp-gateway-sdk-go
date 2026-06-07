@@ -249,6 +249,48 @@ if err != nil {
 }
 ```
 
+## Incoming Messages
+
+Fetch the most recent incoming messages buffered by the gateway (newest first):
+
+```go
+resp, err := client.GetIncomingMessages(ctx, 10)
+if err != nil {
+    log.Fatal(err)
+}
+for _, msg := range resp.Messages {
+    fmt.Printf("[%s] %s: %s\n", msg.Type, msg.From, msg.Text)
+}
+```
+
+Note: media URLs are not populated by this endpoint; use webhooks for fetchable media.
+
+## Job Status
+
+When the gateway runs in queue mode, send endpoints return a job ID instead of
+a message ID. Poll the job until it completes:
+
+```go
+status, err := client.GetJobStatus(ctx, jobID)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Status:", status.Status) // queued | processing | completed | failed
+if status.MessageID != nil {
+    fmt.Println("Message ID:", *status.MessageID)
+}
+```
+
+## Trace IDs
+
+Attach a trace ID to correlate your application logs with gateway logs. Every
+request made with the returned context sends it as the `X-Trace-ID` header:
+
+```go
+ctx := waga.WithTraceID(context.Background(), "order-12345")
+resp, err := client.SendText(ctx, recipient, "Your order shipped!")
+```
+
 ## Webhook Management
 
 ### Register Webhook

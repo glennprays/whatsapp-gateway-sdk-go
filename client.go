@@ -8,7 +8,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 )
 
 // Client is the main SDK client for interacting with the WhatsApp Gateway API.
@@ -18,6 +20,7 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	mu         sync.RWMutex // guards token
 	token      string
 	userAgent  string
 }
@@ -56,12 +59,16 @@ func NewClient(opts ...Option) *Client {
 // Use this method if you already have a valid token from a previous registration.
 // The token will be used for all subsequent API requests that require authentication.
 func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.token = token
 }
 
 // GetToken returns the current JWT token stored in the client.
 // Returns an empty string if no token has been set.
 func (c *Client) GetToken() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.token
 }
 
@@ -85,7 +92,7 @@ func (c *Client) Register(ctx context.Context, phoneNumber, secretKey string) (*
 	}
 
 	// Store token for subsequent requests
-	c.token = resp.Token
+	c.SetToken(resp.Token)
 	return &resp, nil
 }
 
@@ -264,8 +271,11 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -391,8 +401,11 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -504,6 +517,25 @@ func (c *Client) GetIncomingMessages(ctx context.Context, limit int) (*IncomingM
 	return &resp, nil
 }
 
+// GetJobStatus fetches the status of an asynchronously queued message job.
+//
+// When the gateway runs in queue mode, send endpoints return 202 Accepted
+// with a job ID instead of a message ID. Use this method to poll the job
+// until its Status is "completed" or "failed".
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatusResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp JobStatusResponse
+	if err := c.doRequest(ctx, http.MethodGet, "/message/job/"+url.PathEscape(jobID), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // RegisterWebhook registers a URL to receive webhook events.
 // Webhooks allow you to receive real-time notifications for incoming and outgoing messages.
 //
@@ -587,12 +619,16 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
 
 	if requireAuth {
-		if c.token == "" {
+		token := c.GetToken()
+		if token == "" {
 			return ErrNotAuthenticated
 		}
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -620,7 +656,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 }
 
 func (c *Client) checkAuth() error {
-	if c.token == "" {
+	if c.GetToken() == "" {
 		return ErrNotAuthenticated
 	}
 	return nil
