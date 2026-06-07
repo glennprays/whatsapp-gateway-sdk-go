@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Client is the main SDK client for interacting with the WhatsApp Gateway API.
@@ -18,6 +19,7 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	mu         sync.RWMutex // guards token
 	token      string
 	userAgent  string
 }
@@ -56,12 +58,16 @@ func NewClient(opts ...Option) *Client {
 // Use this method if you already have a valid token from a previous registration.
 // The token will be used for all subsequent API requests that require authentication.
 func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.token = token
 }
 
 // GetToken returns the current JWT token stored in the client.
 // Returns an empty string if no token has been set.
 func (c *Client) GetToken() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.token
 }
 
@@ -85,7 +91,7 @@ func (c *Client) Register(ctx context.Context, phoneNumber, secretKey string) (*
 	}
 
 	// Store token for subsequent requests
-	c.token = resp.Token
+	c.SetToken(resp.Token)
 	return &resp, nil
 }
 
@@ -264,7 +270,7 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
 
 	// Execute request
@@ -391,7 +397,7 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
 	req.Header.Set("User-Agent", c.userAgent)
 
 	// Execute request
@@ -589,10 +595,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	req.Header.Set("User-Agent", c.userAgent)
 
 	if requireAuth {
-		if c.token == "" {
+		token := c.GetToken()
+		if token == "" {
 			return ErrNotAuthenticated
 		}
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -620,7 +627,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 }
 
 func (c *Client) checkAuth() error {
-	if c.token == "" {
+	if c.GetToken() == "" {
 		return ErrNotAuthenticated
 	}
 	return nil

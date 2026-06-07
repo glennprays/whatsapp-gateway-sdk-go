@@ -3,10 +3,12 @@ package waga
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -2066,5 +2068,37 @@ func TestGetIncomingMessages_ServerError(t *testing.T) {
 	_, err := client.GetIncomingMessages(context.Background(), 10)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClient_ConcurrentTokenAccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"authenticated":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL), WithToken("initial"))
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(3)
+		go func(i int) {
+			defer wg.Done()
+			client.SetToken(fmt.Sprintf("token-%d", i))
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = client.GetToken()
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = client.GetLoginStatus(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	if client.GetToken() == "" {
+		t.Error("token must not be empty after concurrent updates")
 	}
 }
