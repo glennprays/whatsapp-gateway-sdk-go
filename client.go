@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 )
@@ -505,6 +506,25 @@ func (c *Client) GetIncomingMessages(ctx context.Context, limit int) (*IncomingM
 	path := fmt.Sprintf("/message/incoming?limit=%d", limit)
 	var resp IncomingMessagesResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetJobStatus fetches the status of an asynchronously queued message job.
+//
+// When the gateway runs in queue mode, send endpoints return 202 Accepted
+// with a job ID instead of a message ID. Use this method to poll the job
+// until its Status is "completed" or "failed".
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatusResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp JobStatusResponse
+	if err := c.doRequest(ctx, http.MethodGet, "/message/job/"+url.PathEscape(jobID), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil

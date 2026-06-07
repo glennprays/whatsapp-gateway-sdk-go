@@ -257,3 +257,21 @@ type ErrorResponse struct {
 	// Code is the HTTP status code or API error code
 	Code int `json:"code"`
 }
+
+// JobStatusResponse represents the response from the
+// GET /message/job/:job_id endpoint, used to poll the status of an
+// asynchronously queued message job.
+type JobStatusResponse struct {
+	// JobID is the identifier returned when the message was queued
+	JobID string `json:"job_id"`
+	// Status is one of "queued", "processing", "completed", or "failed"
+	Status string `json:"status"`
+	// MessageID is the WhatsApp message ID once the job completed
+	MessageID *string `json:"message_id,omitempty"`
+	// Error describes why the job failed, if it did
+	Error *string `json:"error,omitempty"`
+	// CreatedAt is when the job was created
+	CreatedAt string `json:"created_at"`
+	// CompletedAt is when the job finished, if it has
+	CompletedAt *string `json:"completed_at,omitempty"`
+}
