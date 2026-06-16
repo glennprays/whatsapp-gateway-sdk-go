@@ -147,7 +147,7 @@ type OutgoingWebhookPayload struct {
 	// PhoneNumber is the sender's phone number
 	PhoneNumber string `json:"phone_number"`
 	// Timestamp is the Unix timestamp of the event
-	Timestamp int `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 	// MessageId is the unique identifier for the message
 	MessageId string `json:"message_id"`
 	// Metadata contains additional optional information about the message
@@ -235,7 +235,7 @@ type IncomingWebhookPayload struct {
 	// PushName is the display name of the sender
 	PushName string `json:"push_name"`
 	// Timestamp is the Unix timestamp when the message was received
-	Timestamp int `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 	// Text is the text content of the message (for text messages)
 	Text string `json:"text,omitempty"`
 	// Type is the message type (see IncomingMessageType constants)
@@ -272,7 +272,7 @@ type IncomingMessage struct {
 	// PushName is the display name of the sender
 	PushName string `json:"push_name"`
 	// Timestamp is the Unix timestamp when the message was received
-	Timestamp int `json:"timestamp"`
+	Timestamp int64 `json:"timestamp"`
 	// Text is the text content of the message (for text messages)
 	Text string `json:"text,omitempty"`
 	// Type is the message type (text, image, video, audio, or document)
