@@ -521,3 +521,119 @@ func TestVerifySignature_WithModifiedPayload(t *testing.T) {
 		t.Error("expected signature to be invalid for modified payload")
 	}
 }
+
+func TestParseIncomingWebhook_Location(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	payload := []byte(`{
+		"event": "message.incoming",
+		"chat": "6281234567890@s.whatsapp.net",
+		"from": "6289876543210@s.whatsapp.net",
+		"is_group": false,
+		"message_id": "msg_loc",
+		"push_name": "John Doe",
+		"timestamp": 1625247600,
+		"type": "location",
+		"latitude": -6.2,
+		"longitude": 106.8,
+		"name": "Jakarta",
+		"address": "Indonesia"
+	}`)
+	sig := ComputeSignature(payload, secret)
+
+	webhook, err := verifier.ParseIncomingWebhook(payload, sig)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if webhook.Type != IncomingMessageTypeLocation {
+		t.Errorf("expected type location, got %s", webhook.Type)
+	}
+	if webhook.Latitude == nil || *webhook.Latitude != -6.2 {
+		t.Errorf("expected latitude -6.2, got %v", webhook.Latitude)
+	}
+	if webhook.Longitude == nil || *webhook.Longitude != 106.8 {
+		t.Errorf("expected longitude 106.8, got %v", webhook.Longitude)
+	}
+	if webhook.Name != "Jakarta" || webhook.Address != "Indonesia" {
+		t.Errorf("unexpected name/address: %q / %q", webhook.Name, webhook.Address)
+	}
+}
+
+func TestParseIncomingWebhook_Poll(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	payload := []byte(`{
+		"event": "message.incoming",
+		"chat": "6281234567890@s.whatsapp.net",
+		"from": "6289876543210@s.whatsapp.net",
+		"is_group": false,
+		"message_id": "msg_poll",
+		"push_name": "John Doe",
+		"timestamp": 1625247600,
+		"type": "poll",
+		"question": "Lunch?",
+		"options": ["Pizza", "Sushi"],
+		"selectable_count": 1
+	}`)
+	sig := ComputeSignature(payload, secret)
+
+	webhook, err := verifier.ParseIncomingWebhook(payload, sig)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if webhook.Type != IncomingMessageTypePoll {
+		t.Errorf("expected type poll, got %s", webhook.Type)
+	}
+	if webhook.Question != "Lunch?" {
+		t.Errorf("expected question Lunch?, got %q", webhook.Question)
+	}
+	if len(webhook.Options) != 2 || webhook.Options[0] != "Pizza" {
+		t.Errorf("unexpected options: %v", webhook.Options)
+	}
+	if webhook.SelectableCount != 1 {
+		t.Errorf("expected selectable_count 1, got %d", webhook.SelectableCount)
+	}
+}
+
+func TestParseIncomingWebhook_StickerMedia(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	payload := []byte(`{
+		"event": "message.incoming",
+		"chat": "6281234567890@s.whatsapp.net",
+		"from": "6289876543210@s.whatsapp.net",
+		"is_group": false,
+		"message_id": "msg_sticker",
+		"push_name": "John Doe",
+		"timestamp": 1625247600,
+		"type": "sticker",
+		"media": {
+			"type": "sticker",
+			"mime_type": "image/webp",
+			"sha256": "deadbeef",
+			"url": "https://gw.example/storage/abc.webp",
+			"storage_url": "https://gw.example/storage/abc.webp"
+		}
+	}`)
+	sig := ComputeSignature(payload, secret)
+
+	webhook, err := verifier.ParseIncomingWebhook(payload, sig)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if webhook.Type != IncomingMessageTypeSticker {
+		t.Errorf("expected type sticker, got %s", webhook.Type)
+	}
+	if webhook.Media == nil {
+		t.Fatal("expected media to be present")
+	}
+	if webhook.Media.Sha256 != "deadbeef" {
+		t.Errorf("expected sha256 deadbeef, got %q", webhook.Media.Sha256)
+	}
+	if webhook.Media.StorageURL != "https://gw.example/storage/abc.webp" {
+		t.Errorf("unexpected storage_url: %q", webhook.Media.StorageURL)
+	}
+}

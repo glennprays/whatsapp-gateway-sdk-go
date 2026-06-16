@@ -176,6 +176,21 @@ const (
 	IncomingMessageTypeAudio IncomingMessageType = "audio"
 	// IncomingMessageTypeDocument represents a document message
 	IncomingMessageTypeDocument IncomingMessageType = "document"
+	// IncomingMessageTypeSticker represents a sticker message
+	IncomingMessageTypeSticker IncomingMessageType = "sticker"
+	// IncomingMessageTypeLocation represents a location message.
+	// Webhook payloads carry Latitude/Longitude/Name/Address; the polled
+	// /message/incoming endpoint reports only the type.
+	IncomingMessageTypeLocation IncomingMessageType = "location"
+	// IncomingMessageTypePoll represents a poll message.
+	// Webhook payloads carry Question/Options/SelectableCount.
+	IncomingMessageTypePoll IncomingMessageType = "poll"
+	// IncomingMessageTypeContact represents a contact message (reported only
+	// by the polled /message/incoming endpoint; no detail fields)
+	IncomingMessageTypeContact IncomingMessageType = "contact"
+	// IncomingMessageTypeUnknown is reported for message types the gateway
+	// does not specifically model
+	IncomingMessageTypeUnknown IncomingMessageType = "unknown"
 )
 
 // IncomingMessageMediaInfo contains media information for incoming messages with attachments.
@@ -183,8 +198,15 @@ const (
 type IncomingMessageMediaInfo struct {
 	// Type is the media type (image, video, audio, or document)
 	Type IncomingMessageType `json:"type"`
-	// Url is the direct URL to download the media file
+	// Url is the direct URL to download the media file. In webhooks it mirrors
+	// StorageURL when the gateway stored the media, otherwise WhatsappURL.
 	Url string `json:"url"`
+	// StorageURL is the gateway-hosted URL when the media was downloaded and
+	// stored (webhooks only)
+	StorageURL string `json:"storage_url,omitempty"`
+	// WhatsappURL is the raw WhatsApp media URL used when storage was skipped
+	// or failed (webhooks only)
+	WhatsappURL string `json:"whatsapp_url,omitempty"`
 	// MimeType is the MIME type of the media file
 	MimeType string `json:"mime_type"`
 	// Filename is the original filename of the media file (if applicable)
@@ -193,6 +215,8 @@ type IncomingMessageMediaInfo struct {
 	Caption string `json:"caption,omitempty"`
 	// Size is the file size in bytes (if available)
 	Size int `json:"size,omitempty"`
+	// Sha256 is the hex-encoded SHA-256 hash of the media file (webhooks only)
+	Sha256 string `json:"sha256,omitempty"`
 }
 
 // IncomingWebhookPayload represents the payload sent to webhooks for incoming message events.
@@ -214,10 +238,22 @@ type IncomingWebhookPayload struct {
 	Timestamp int `json:"timestamp"`
 	// Text is the text content of the message (for text messages)
 	Text string `json:"text,omitempty"`
-	// Type is the message type (text, image, video, audio, or document)
+	// Type is the message type (see IncomingMessageType constants)
 	Type IncomingMessageType `json:"type"`
-	// Media contains media information for non-text messages
+	// Media contains media information for image/video/audio/document/sticker
 	Media *IncomingMessageMediaInfo `json:"media,omitempty"`
+
+	// Location fields (Type == IncomingMessageTypeLocation).
+	// Latitude/Longitude are pointers because (0,0) is a valid location.
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	Address   string   `json:"address,omitempty"`
+
+	// Poll fields (Type == IncomingMessageTypePoll).
+	Question        string   `json:"question,omitempty"`
+	Options         []string `json:"options,omitempty"`
+	SelectableCount int      `json:"selectable_count,omitempty"`
 }
 
 // IncomingMessage represents a single received message returned by the
