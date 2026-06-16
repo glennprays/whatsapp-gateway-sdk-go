@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-08
+
+### Added
+- Send methods now surface queued-mode results: `SendMessageResponse` gained
+  `Status` and `JobID`. In queue mode the gateway returns `202` with a job ID
+  (previously silently dropped); poll it with `GetJobStatus`. Direct mode still
+  returns `MessageID`.
+- Incoming webhook payloads now model sticker, location, and poll messages:
+  new `IncomingMessageType` constants (`Sticker`, `Location`, `Poll`, plus
+  `Contact`/`Unknown` reported by the polled inbox), top-level location fields
+  (`Latitude`, `Longitude`, `Name`, `Address`) and poll fields (`Question`,
+  `Options`, `SelectableCount`) on `IncomingWebhookPayload`.
+- `IncomingMessageMediaInfo` gained `Sha256`, `StorageURL`, and `WhatsappURL`.
+- Failed requests now carry the gateway's trace ID: `SDKError.TraceID` is
+  populated from the `X-Trace-ID` response header and shown in `Error()`, so
+  failures can be correlated with gateway logs.
+
+### Changed
+- **Breaking (minor, pre-1.0):** webhook `Timestamp` fields are now `int64`
+  (were `int`) on `OutgoingWebhookPayload`, `IncomingWebhookPayload`, and
+  `IncomingMessage`, matching the gateway's int64 Unix-second timestamps and
+  avoiding overflow on 32-bit platforms.
+
 ## [0.4.0] - 2026-06-08
 
 ### Added
