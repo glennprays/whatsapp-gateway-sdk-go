@@ -51,11 +51,21 @@ type SendMessageTextRequest struct {
 }
 
 // SendMessageResponse represents the response from sending a message.
+//
+// The populated fields depend on the gateway's delivery mode:
+//   - Direct mode (HTTP 200): MessageId holds the sent WhatsApp message ID.
+//   - Queue mode (HTTP 202): Status is "queued" and JobID holds the job
+//     identifier — poll it with GetJobStatus to obtain the message ID once
+//     the job completes. MessageId is empty in this case.
 type SendMessageResponse struct {
-	// Success indicates whether the message was successfully queued
+	// Success indicates whether the message was successfully sent or queued
 	Success bool `json:"success"`
-	// MessageId is the unique identifier for the sent message
-	MessageId string `json:"message_id"`
+	// MessageId is the unique identifier for the sent message (direct mode)
+	MessageId string `json:"message_id,omitempty"`
+	// Status is the job status in queue mode (e.g. "queued")
+	Status string `json:"status,omitempty"`
+	// JobID identifies the queued job in queue mode; poll it with GetJobStatus
+	JobID string `json:"job_id,omitempty"`
 }
 
 // SendLocationMessageRequest represents a request to send a location message.
