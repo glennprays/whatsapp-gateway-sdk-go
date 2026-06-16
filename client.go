@@ -290,7 +290,7 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, parseError(body, resp.StatusCode)
+		return nil, parseError(body, resp.StatusCode, resp.Header.Get(TraceIDHeader))
 	}
 
 	var result SendMessageResponse
@@ -420,7 +420,7 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, parseError(body, resp.StatusCode)
+		return nil, parseError(body, resp.StatusCode, resp.Header.Get(TraceIDHeader))
 	}
 
 	var result SendMessageResponse
@@ -643,7 +643,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return parseError(respBody, resp.StatusCode)
+		return parseError(respBody, resp.StatusCode, resp.Header.Get(TraceIDHeader))
 	}
 
 	if result != nil && len(respBody) > 0 {

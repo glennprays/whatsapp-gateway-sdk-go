@@ -1,14 +1,19 @@
 package waga
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 // TestParseError_ValidErrorResponse tests parsing a valid error response with code and message
 func TestParseError_ValidErrorResponse(t *testing.T) {
 	body := []byte(`{"code": 404, "error": "resource not found"}`)
-	err := parseError(body, 404)
+	err := parseError(body, 404, "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -30,7 +35,7 @@ func TestParseError_ValidErrorResponse(t *testing.T) {
 // TestParseError_MalformedJSON tests parsing with malformed JSON (fallback to raw body)
 func TestParseError_MalformedJSON(t *testing.T) {
 	body := []byte(`this is not valid json`)
-	err := parseError(body, 500)
+	err := parseError(body, 500, "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -52,7 +57,7 @@ func TestParseError_MalformedJSON(t *testing.T) {
 // TestParseError_EmptyBody tests parsing with empty response body
 func TestParseError_EmptyBody(t *testing.T) {
 	body := []byte{}
-	err := parseError(body, 503)
+	err := parseError(body, 503, "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -71,7 +76,7 @@ func TestParseError_EmptyBody(t *testing.T) {
 // TestParseError_MissingCodeField tests error response with missing code field
 func TestParseError_MissingCodeField(t *testing.T) {
 	body := []byte(`{"error": "something went wrong"}`)
-	err := parseError(body, 0)
+	err := parseError(body, 0, "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -94,7 +99,7 @@ func TestParseError_MissingCodeField(t *testing.T) {
 // TestParseError_MissingMessageField tests error response with missing message field
 func TestParseError_MissingMessageField(t *testing.T) {
 	body := []byte(`{"code": 400}`)
-	err := parseError(body, 0)
+	err := parseError(body, 0, "")
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -128,7 +133,7 @@ func TestParseError_HTTPStatusCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := parseError([]byte(tt.body), tt.statusCode)
+			err := parseError([]byte(tt.body), tt.statusCode, "")
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -333,5 +338,40 @@ func TestIsUnauthorized(t *testing.T) {
 	custom401 := &SDKError{Code: 401, Message: "custom unauthorized"}
 	if !IsUnauthorized(custom401) {
 		t.Error("expected IsUnauthorized to return true for custom 401 error")
+	}
+}
+
+func TestParseError_PopulatesTraceID(t *testing.T) {
+	err := parseError([]byte(`{"error":"boom","code":500}`), 500, "trace-xyz")
+	var sdkErr *SDKError
+	if !errors.As(err, &sdkErr) {
+		t.Fatalf("expected *SDKError, got %T", err)
+	}
+	if sdkErr.TraceID != "trace-xyz" {
+		t.Errorf("expected trace ID trace-xyz, got %q", sdkErr.TraceID)
+	}
+	if !strings.Contains(sdkErr.Error(), "trace_id=trace-xyz") {
+		t.Errorf("expected Error() to include trace id, got %q", sdkErr.Error())
+	}
+}
+
+func TestClient_ErrorCarriesResponseTraceID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(TraceIDHeader, "gw-generated-123")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"internal","code":500}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("tok"))
+	_, err := client.SendText(context.Background(), "6281234567890@s.whatsapp.net", "hi")
+
+	var sdkErr *SDKError
+	if !errors.As(err, &sdkErr) {
+		t.Fatalf("expected *SDKError, got %T (%v)", err, err)
+	}
+	if sdkErr.TraceID != "gw-generated-123" {
+		t.Errorf("expected trace ID from response header, got %q", sdkErr.TraceID)
 	}
 }
