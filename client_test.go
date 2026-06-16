@@ -2146,3 +2146,30 @@ func TestGetJobStatus_RequiresAuth(t *testing.T) {
 		t.Errorf("expected ErrNotAuthenticated, got %v", err)
 	}
 }
+
+func TestSendText_QueueMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted) // 202 queue mode
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, Status: "queued", JobID: "job_abc"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.SendText(context.Background(), "6281234567890@s.whatsapp.net", "Hello!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Success {
+		t.Error("expected success to be true")
+	}
+	if resp.JobID != "job_abc" {
+		t.Errorf("expected job ID job_abc, got %q", resp.JobID)
+	}
+	if resp.Status != "queued" {
+		t.Errorf("expected status queued, got %q", resp.Status)
+	}
+	if resp.MessageId != "" {
+		t.Errorf("expected empty message ID in queue mode, got %q", resp.MessageId)
+	}
+}

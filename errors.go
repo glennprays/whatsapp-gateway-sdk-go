@@ -14,9 +14,15 @@ type SDKError struct {
 	Code int `json:"code"`
 	// Message is the error message describing what went wrong
 	Message string `json:"error"`
+	// TraceID is the gateway's X-Trace-ID for this request, if the response
+	// carried one. Use it to correlate the failure with gateway logs.
+	TraceID string `json:"-"`
 }
 
 func (e *SDKError) Error() string {
+	if e.TraceID != "" {
+		return fmt.Sprintf("sdk error: code=%d, message=%s, trace_id=%s", e.Code, e.Message, e.TraceID)
+	}
 	return fmt.Sprintf("sdk error: code=%d, message=%s", e.Code, e.Message)
 }
 
@@ -62,7 +68,7 @@ var (
 // parseError attempts to parse an error response from the API.
 // If the response body contains a valid error JSON, it returns an SDKError.
 // Otherwise, it returns a generic SDKError with the status code and raw body.
-func parseError(body []byte, statusCode int) error {
+func parseError(body []byte, statusCode int, traceID string) error {
 	var apiErr SDKError
 	if err := json.Unmarshal(body, &apiErr); err != nil {
 		// If we can't parse the error, return a generic one
@@ -74,6 +80,7 @@ func parseError(body []byte, statusCode int) error {
 	if apiErr.Code == 0 {
 		apiErr.Code = statusCode
 	}
+	apiErr.TraceID = traceID
 	return &apiErr
 }
 

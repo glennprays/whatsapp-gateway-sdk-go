@@ -267,17 +267,24 @@ Note: media URLs are not populated by this endpoint; use webhooks for fetchable 
 
 ## Job Status
 
-When the gateway runs in queue mode, send endpoints return a job ID instead of
-a message ID. Poll the job until it completes:
+When the gateway runs in queue mode, send methods return a job ID instead of a
+message ID. The send response tells you which mode you're in:
 
 ```go
-status, err := client.GetJobStatus(ctx, jobID)
+resp, err := client.SendText(ctx, recipient, "Hello!")
 if err != nil {
     log.Fatal(err)
 }
-fmt.Println("Status:", status.Status) // queued | processing | completed | failed
-if status.MessageID != nil {
-    fmt.Println("Message ID:", *status.MessageID)
+if resp.JobID != "" {
+    // Queue mode: poll the job until it completes
+    status, _ := client.GetJobStatus(ctx, resp.JobID)
+    fmt.Println("Status:", status.Status) // queued | processing | completed | failed
+    if status.MessageID != nil {
+        fmt.Println("Message ID:", *status.MessageID)
+    }
+} else {
+    // Direct mode: the message ID is available immediately
+    fmt.Println("Message ID:", resp.MessageId)
 }
 ```
 
@@ -289,6 +296,18 @@ request made with the returned context sends it as the `X-Trace-ID` header:
 ```go
 ctx := waga.WithTraceID(context.Background(), "order-12345")
 resp, err := client.SendText(ctx, recipient, "Your order shipped!")
+```
+
+If a request fails, the gateway's trace ID is attached to the error so you can
+find the failing request in the gateway logs:
+
+```go
+if err != nil {
+    var apiErr *waga.SDKError
+    if errors.As(err, &apiErr) {
+        log.Printf("gateway error (trace %s): %s", apiErr.TraceID, apiErr.Message)
+    }
+}
 ```
 
 ## Webhook Management
