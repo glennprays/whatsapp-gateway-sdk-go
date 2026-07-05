@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-05
+
+### Added
+- New media send methods for v0.11 gateway parity:
+  - `SendAudio(ctx, msisdn, audio, isPTT, isViewOnce)`
+  - `SendVideo(ctx, msisdn, video, caption, isGif, isViewOnce)`
+  - `SendDocument(ctx, msisdn, document, fileName, caption)`
+- `CheckContact(ctx, msisdn)` for `GET /contact/check`.
+- New `ContactCheckResponse` type.
+
+### Changed
+- `MessageReactRequest` now supports optional `sender_msisdn`.
+- `React` now accepts an optional variadic sender argument:
+  `React(ctx, msisdn, messageID, emoji, senderMsisdn...)`.
+
 ## [0.5.0] - 2026-06-08
 
 ### Added
