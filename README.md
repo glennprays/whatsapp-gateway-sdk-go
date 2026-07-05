@@ -182,6 +182,54 @@ if err != nil {
 fmt.Println("Message ID:", resp.MessageId)
 ```
 
+### Audio Message
+
+```go
+file, err := os.Open("voice.ogg")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+resp, err := client.SendAudio(ctx, recipient, file, true, false) // isPTT=true
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
+### Video Message
+
+```go
+file, err := os.Open("clip.mp4")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+resp, err := client.SendVideo(ctx, recipient, file, "Look at this", false, false)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
+### Document Message
+
+```go
+file, err := os.Open("invoice.pdf")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+resp, err := client.SendDocument(ctx, recipient, file, "invoice.pdf", "Monthly invoice")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Message ID:", resp.MessageId)
+```
+
 ### Location Message
 
 ```go
@@ -247,6 +295,22 @@ err := client.React(ctx, recipient, messageID, "👍")
 if err != nil {
     log.Fatal(err)
 }
+```
+
+For reactions to incoming messages in groups/DMs, pass optional `sender_msisdn`:
+
+```go
+err := client.React(ctx, groupJID, messageID, "👍", "6281111111111@s.whatsapp.net")
+```
+
+### Check Contact
+
+```go
+contact, err := client.CheckContact(ctx, "6281234567890")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(contact.JID, contact.IsOnWhatsApp, contact.VerifiedName)
 ```
 
 ## Incoming Messages

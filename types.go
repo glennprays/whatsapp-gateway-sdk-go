@@ -120,6 +120,22 @@ type MessageReactRequest struct {
 	Msisdn string `json:"msisdn"`
 	// Emoji is the emoji reaction to add
 	Emoji string `json:"emoji"`
+	// SenderMsisdn is optional and should be set when reacting to an incoming
+	// message from another sender (e.g. group chats).
+	SenderMsisdn string `json:"sender_msisdn,omitempty"`
+}
+
+// ContactCheckResponse is the result of validating a recipient number on
+// WhatsApp.
+type ContactCheckResponse struct {
+	// Query is the original queried number.
+	Query string `json:"query"`
+	// JID is the canonical WhatsApp JID.
+	JID string `json:"jid"`
+	// IsOnWhatsApp indicates whether the number is registered on WhatsApp.
+	IsOnWhatsApp bool `json:"is_on_whatsapp"`
+	// VerifiedName is the business verified name, if available.
+	VerifiedName *string `json:"verified_name,omitempty"`
 }
 
 // OutgoingEventMessage represents the type of outgoing message event.

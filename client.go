@@ -431,6 +431,220 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	return &result, nil
 }
 
+// SendAudio sends an audio message to the specified recipient.
+//
+// The audio parameter is an io.Reader containing the audio file bytes.
+// If isPTT is true, WhatsApp renders the audio as a voice note bubble.
+// If isViewOnce is true, the media is sent as view-once.
+func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, isPTT, isViewOnce bool) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	if err := writer.WriteField("msisdn", msisdn); err != nil {
+		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if isPTT {
+		if err := writer.WriteField("is_ptt", "true"); err != nil {
+			return nil, fmt.Errorf("failed to write is_ptt field: %w", err)
+		}
+	}
+	if isViewOnce {
+		if err := writer.WriteField("is_view_once", "true"); err != nil {
+			return nil, fmt.Errorf("failed to write is_view_once field: %w", err)
+		}
+	}
+
+	part, err := writer.CreateFormFile("audio", "audio.ogg")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audio form file: %w", err)
+	}
+	if _, err := io.Copy(part, audio); err != nil {
+		return nil, fmt.Errorf("failed to copy audio data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/message/audio", &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
+	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(body, resp.StatusCode, resp.Header.Get(TraceIDHeader))
+	}
+
+	var result SendMessageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &result, nil
+}
+
+// SendVideo sends a video message to the specified recipient.
+//
+// The video parameter is an io.Reader containing the video file bytes.
+// caption is optional. isGif toggles GIF-like rendering. isViewOnce controls
+// view-once behavior.
+func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, caption string, isGif, isViewOnce bool) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	if err := writer.WriteField("msisdn", msisdn); err != nil {
+		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if caption != "" {
+		if err := writer.WriteField("caption", caption); err != nil {
+			return nil, fmt.Errorf("failed to write caption field: %w", err)
+		}
+	}
+	if isGif {
+		if err := writer.WriteField("is_gif", "true"); err != nil {
+			return nil, fmt.Errorf("failed to write is_gif field: %w", err)
+		}
+	}
+	if isViewOnce {
+		if err := writer.WriteField("is_view_once", "true"); err != nil {
+			return nil, fmt.Errorf("failed to write is_view_once field: %w", err)
+		}
+	}
+
+	part, err := writer.CreateFormFile("video", "video.mp4")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create video form file: %w", err)
+	}
+	if _, err := io.Copy(part, video); err != nil {
+		return nil, fmt.Errorf("failed to copy video data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/message/video", &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
+	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(body, resp.StatusCode, resp.Header.Get(TraceIDHeader))
+	}
+
+	var result SendMessageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &result, nil
+}
+
+// SendDocument sends a document message to the specified recipient.
+//
+// fileName and caption are optional. When fileName is empty, the gateway uses
+// its own default naming.
+func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Reader, fileName, caption string) (*SendMessageResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	if err := writer.WriteField("msisdn", msisdn); err != nil {
+		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if fileName != "" {
+		if err := writer.WriteField("file_name", fileName); err != nil {
+			return nil, fmt.Errorf("failed to write file_name field: %w", err)
+		}
+	}
+	if caption != "" {
+		if err := writer.WriteField("caption", caption); err != nil {
+			return nil, fmt.Errorf("failed to write caption field: %w", err)
+		}
+	}
+
+	part, err := writer.CreateFormFile("document", "document.bin")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create document form file: %w", err)
+	}
+	if _, err := io.Copy(part, document); err != nil {
+		return nil, fmt.Errorf("failed to copy document data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/message/document", &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
+	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(body, resp.StatusCode, resp.Header.Get(TraceIDHeader))
+	}
+
+	var result SendMessageResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &result, nil
+}
+
 // EditMessage edits a previously sent message.
 // It replaces the message content with newMessage.
 //
@@ -481,7 +695,7 @@ func (c *Client) DeleteMessage(ctx context.Context, msisdn, messageID string) er
 // to react to, and emoji is the emoji character(s) to use (e.g., "👍", "❤️").
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) React(ctx context.Context, msisdn, messageID, emoji string) error {
+func (c *Client) React(ctx context.Context, msisdn, messageID, emoji string, senderMsisdn ...string) error {
 	if err := c.checkAuth(); err != nil {
 		return err
 	}
@@ -491,9 +705,29 @@ func (c *Client) React(ctx context.Context, msisdn, messageID, emoji string) err
 		MessageId: messageID,
 		Emoji:     emoji,
 	}
+	if len(senderMsisdn) > 0 && senderMsisdn[0] != "" {
+		reqBody.SenderMsisdn = senderMsisdn[0]
+	}
 
 	var resp SuccessResponse
 	return c.doRequest(ctx, http.MethodPost, "/message/react", reqBody, &resp, true)
+}
+
+// CheckContact validates whether a recipient is registered on WhatsApp.
+//
+// The msisdn argument can be a plain phone number or WhatsApp JID; the gateway
+// normalizes it and returns canonical JID details.
+func (c *Client) CheckContact(ctx context.Context, msisdn string) (*ContactCheckResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp ContactCheckResponse
+	path := "/contact/check?msisdn=" + url.QueryEscape(msisdn)
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // GetIncomingMessages fetches the most recent incoming messages buffered by the
