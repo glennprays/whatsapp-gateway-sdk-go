@@ -937,6 +937,106 @@ func TestSendImage_MultipartFormValidation(t *testing.T) {
 	}
 }
 
+func TestSendAudio_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/audio" {
+			t.Errorf("expected path /api/v1/message/audio, got %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Errorf("failed to parse multipart form: %v", err)
+		}
+		if r.FormValue("msisdn") != "6281234567890@s.whatsapp.net" {
+			t.Errorf("expected msisdn, got %s", r.FormValue("msisdn"))
+		}
+		if r.FormValue("is_ptt") != "true" {
+			t.Errorf("expected is_ptt true, got %s", r.FormValue("is_ptt"))
+		}
+		if r.FormValue("is_view_once") != "true" {
+			t.Errorf("expected is_view_once true, got %s", r.FormValue("is_view_once"))
+		}
+
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "aud_123"})
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+	audio := &mockImageReader{data: []byte("audio-data")}
+	resp, err := client.SendAudio(context.Background(), "6281234567890@s.whatsapp.net", audio, true, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.MessageId != "aud_123" {
+		t.Errorf("expected message ID 'aud_123', got %s", resp.MessageId)
+	}
+}
+
+func TestSendVideo_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/video" {
+			t.Errorf("expected path /api/v1/message/video, got %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Errorf("failed to parse multipart form: %v", err)
+		}
+		if r.FormValue("caption") != "hello video" {
+			t.Errorf("expected caption 'hello video', got %s", r.FormValue("caption"))
+		}
+		if r.FormValue("is_gif") != "true" {
+			t.Errorf("expected is_gif true, got %s", r.FormValue("is_gif"))
+		}
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "vid_123"})
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+	video := &mockImageReader{data: []byte("video-data")}
+	resp, err := client.SendVideo(context.Background(), "6281234567890@s.whatsapp.net", video, "hello video", true, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.MessageId != "vid_123" {
+		t.Errorf("expected message ID 'vid_123', got %s", resp.MessageId)
+	}
+}
+
+func TestSendDocument_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/document" {
+			t.Errorf("expected path /api/v1/message/document, got %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Errorf("failed to parse multipart form: %v", err)
+		}
+		if r.FormValue("file_name") != "invoice.pdf" {
+			t.Errorf("expected file_name 'invoice.pdf', got %s", r.FormValue("file_name"))
+		}
+		if r.FormValue("caption") != "monthly invoice" {
+			t.Errorf("expected caption 'monthly invoice', got %s", r.FormValue("caption"))
+		}
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "doc_123"})
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+	doc := &mockImageReader{data: []byte("doc-data")}
+	resp, err := client.SendDocument(context.Background(), "6281234567890@s.whatsapp.net", doc, "invoice.pdf", "monthly invoice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.MessageId != "doc_123" {
+		t.Errorf("expected message ID 'doc_123', got %s", resp.MessageId)
+	}
+}
+
 // TestSendLocation_Success tests successful location send
 func TestSendLocation_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1430,6 +1530,67 @@ func TestReact_MessageNotFound(t *testing.T) {
 	}
 	if !IsNotFound(err) {
 		t.Errorf("expected IsNotFound to be true, got %v", err)
+	}
+}
+
+func TestReact_WithSenderMsisdn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var reqBody MessageReactRequest
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if reqBody.SenderMsisdn != "6281111111111@s.whatsapp.net" {
+			t.Errorf("expected sender_msisdn to be set, got %q", reqBody.SenderMsisdn)
+		}
+		json.NewEncoder(w).Encode(SuccessResponse{Success: true})
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+	err := client.React(
+		context.Background(),
+		"120363xxxxx@g.us",
+		"msg_123",
+		"👍",
+		"6281111111111@s.whatsapp.net",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckContact_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/contact/check" {
+			t.Errorf("expected path /api/v1/contact/check, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("msisdn"); got != "6281234567890@s.whatsapp.net" {
+			t.Errorf("expected msisdn query, got %q", got)
+		}
+
+		resp := ContactCheckResponse{
+			Query:        "6281234567890",
+			JID:          "6281234567890@s.whatsapp.net",
+			IsOnWhatsApp: true,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+	resp, err := client.CheckContact(context.Background(), "6281234567890@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.IsOnWhatsApp {
+		t.Errorf("expected is_on_whatsapp true, got false")
 	}
 }
 
