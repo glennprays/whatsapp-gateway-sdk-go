@@ -86,6 +86,23 @@ func parseError(body []byte, statusCode int, traceID string) error {
 			Message: string(body),
 		}
 	}
+	// Tolerate gateway builds that serialize the error as the Go field names
+	// {"Status","Message"} instead of the documented {"code","error"} shape, so
+	// the human-readable message is not silently dropped against an older gateway.
+	if apiErr.Message == "" || apiErr.Code == 0 {
+		var alt struct {
+			Status  int    `json:"status"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &alt) == nil {
+			if apiErr.Message == "" {
+				apiErr.Message = alt.Message
+			}
+			if apiErr.Code == 0 {
+				apiErr.Code = alt.Status
+			}
+		}
+	}
 	if apiErr.Code == 0 {
 		apiErr.Code = statusCode
 	}
