@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catalog covering the four message events too.
 - New `ErrUnknownWebhookEvent` sentinel returned by `ParseWebhook` for
   unrecognized events.
+- **Contact and group read methods** with matching response types:
+  - `ListContacts(ctx, limit, offset)` → `GET /contact/` (paginated locally-synced
+    contacts; `count`/`total`; never 404s on empty).
+  - `GetContactInfo(ctx, chat)` → `GET /contact/info` (status, picture id,
+    verified name, device count, lid).
+  - `GetAvatar(ctx, chat, preview, priorID...)` → `GET /contact/avatar` for a user
+    or group. Pass the previous `AvatarResponse.ID` as the optional `priorID` for
+    conditional (`If-None-Match`) fetches: an unchanged picture returns the new
+    `ErrNotModified` sentinel (304); no picture → `ErrNotFound` (404); hidden →
+    `ErrForbidden` (403).
+  - `ListGroups(ctx)` → `GET /group/` (joined-group summaries; may return
+    `ErrRateLimited` (429) when the per-account read budget is exhausted).
+  - `GetGroupInfo(ctx, chat)` → `GET /group/info` (full detail + participant
+    roster; `ErrForbidden` if not a member, `ErrNotFound` if absent).
+- **Two-way primitives:**
+  - `MarkRead(ctx, chat, messageIDs, sender)` → `POST /message/read` (blue ticks;
+    `sender` required for group chats).
+  - `SendChatPresence(ctx, chat, state)` → `POST /chat/presence` with the
+    `PresenceComposing` / `PresenceRecording` / `PresencePaused` states.
+- New `ErrNotModified` sentinel (returned by `GetAvatar` on a 304).
 
 ## [0.6.0] - 2026-07-05
 

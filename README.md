@@ -367,6 +367,113 @@ for _, msg := range resp.Messages {
 
 Note: media URLs are not populated by this endpoint; use webhooks for fetchable media.
 
+## Contacts & Groups
+
+All of these accept the canonical `chat` (a bare number, `@s.whatsapp.net`,
+`@g.us`, or `@lid`).
+
+### List Contacts
+
+Locally-synced contacts, paginated (`limit` defaults to 100, max 500). Never
+errors on an empty address book:
+
+```go
+page, err := client.ListContacts(ctx, 100, 0) // limit, offset
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%d of %d contacts\n", page.Count, page.Total)
+for _, ct := range page.Contacts {
+    fmt.Println(ct.JID, ct.PushName)
+}
+```
+
+### Contact Info
+
+Server-side profile lookup (status, picture id, verified name, device count, lid):
+
+```go
+info, err := client.GetContactInfo(ctx, "6281234567890")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(info.Status, info.DeviceCount, info.LID)
+```
+
+### Avatar (with conditional fetch)
+
+Profile picture for a user *or* group. `preview` requests the thumbnail. The
+returned `ID` doubles as an ETag — pass it back as the optional `priorID` to skip
+re-downloading when unchanged:
+
+```go
+av, err := client.GetAvatar(ctx, "6281234567890", false)
+if err != nil {
+    if errors.Is(err, waga.ErrNotFound) {
+        // no profile picture
+    } else if errors.Is(err, waga.ErrForbidden) {
+        // picture hidden by privacy settings
+    }
+    return
+}
+fmt.Println(av.URL, av.ID)
+
+// Later — only re-fetch if the picture changed:
+av2, err := client.GetAvatar(ctx, "6281234567890", false, av.ID)
+if errors.Is(err, waga.ErrNotModified) {
+    // unchanged; keep the cached av
+}
+```
+
+### List Groups
+
+Joined-group summaries. This is a budgeted server read — a `429` maps to
+`ErrRateLimited`:
+
+```go
+groups, err := client.ListGroups(ctx)
+if errors.Is(err, waga.ErrRateLimited) {
+    // read budget exhausted; back off
+}
+for _, g := range groups.Groups {
+    fmt.Println(g.JID, g.Name, g.ParticipantCount)
+}
+```
+
+### Group Info
+
+Full detail plus participant roster. Requires a group JID; `ErrForbidden` if the
+account is not a member, `ErrNotFound` if the group is absent:
+
+```go
+g, err := client.GetGroupInfo(ctx, "120363000000000000@g.us")
+if err != nil {
+    log.Fatal(err)
+}
+for _, p := range g.Participants {
+    fmt.Println(p.JID, p.IsAdmin, p.IsSuperAdmin)
+}
+```
+
+## Read Receipts & Presence
+
+### Mark Messages as Read
+
+Sends blue ticks. For group chats, pass the message author as `sender`:
+
+```go
+err := client.MarkRead(ctx, "120363000000000000@g.us",
+    []string{"MSG_ID_1", "MSG_ID_2"},
+    "6281234567890@s.whatsapp.net") // sender (author); "" for one-to-one chats
+```
+
+### Typing Indicator
+
+```go
+err := client.SendChatPresence(ctx, recipient, waga.PresenceComposing) // typing…
+// ... waga.PresenceRecording (voice note) / waga.PresencePaused (cleared)
+```
+
 ## Job Status
 
 When the gateway runs in queue mode, send methods return a job ID instead of a
@@ -591,6 +698,7 @@ if err != nil {
 | `ErrForbidden` | 403 | No permission for this action |
 | `ErrNotFound` | 404 | Resource not found |
 | `ErrConflict` | 409 | Resource conflict |
+| `ErrNotModified` | 304 | `GetAvatar` — picture unchanged (conditional fetch) |
 | `ErrRateLimited` | 429 | Too many requests |
 | `ErrInternalServer` | 500 | Server error |
 | `ErrInvalidSignature` | - | Webhook signature verification failed |
