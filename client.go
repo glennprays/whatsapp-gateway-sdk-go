@@ -190,14 +190,20 @@ func (c *Client) Reconnect(ctx context.Context) error {
 // For group messages, use the group ID in the format "groupId@g.us".
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendText(ctx context.Context, msisdn, message string) (*SendMessageResponse, error) {
+func (c *Client) SendText(ctx context.Context, msisdn, message string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendMessageTextRequest{
-		Msisdn:  msisdn,
-		Message: message,
+		Chat:          cfg.chat,
+		Msisdn:        msisdn,
+		Message:       message,
+		ReplyToID:     cfg.replyToID,
+		ReplyToSender: cfg.replyToSender,
+		ReplyToText:   cfg.replyToText,
+		Mentions:      cfg.mentions,
 	}
 
 	var resp SendMessageResponse
@@ -205,6 +211,33 @@ func (c *Client) SendText(ctx context.Context, msisdn, message string) (*SendMes
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// writeSendContext writes the shared chat/reply/mentions multipart form fields
+// carried by every media send. mentions are written as repeated fields (one
+// "mentions" part per entry) because the gateway binds them to a []string;
+// comma-joining would be parsed as a single mention.
+func writeSendContext(w *multipart.Writer, cfg sendConfig) error {
+	fields := []struct{ name, value string }{
+		{"chat", cfg.chat},
+		{"reply_to_id", cfg.replyToID},
+		{"reply_to_sender", cfg.replyToSender},
+		{"reply_to_text", cfg.replyToText},
+	}
+	for _, f := range fields {
+		if f.value == "" {
+			continue
+		}
+		if err := w.WriteField(f.name, f.value); err != nil {
+			return fmt.Errorf("failed to write %s field: %w", f.name, err)
+		}
+	}
+	for _, m := range cfg.mentions {
+		if err := w.WriteField("mentions", m); err != nil {
+			return fmt.Errorf("failed to write mentions field: %w", err)
+		}
+	}
+	return nil
 }
 
 // SendImage sends an image message to the specified recipient.
@@ -222,10 +255,12 @@ func (c *Client) SendText(ctx context.Context, msisdn, message string) (*SendMes
 //	resp, err := client.SendImage(ctx, msisdn, file, "Check this out!", false)
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, caption string, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, caption string, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
+
+	cfg := newSendConfig(opts)
 
 	// Build multipart form
 	var buf bytes.Buffer
@@ -234,6 +269,11 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+
+	// Add chat/reply/mentions context
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 
 	// Add caption if provided
@@ -308,17 +348,23 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 // The name and address parameters are optional metadata for the location pin.
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, longitude float64, name, address string) (*SendMessageResponse, error) {
+func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, longitude float64, name, address string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendLocationMessageRequest{
-		Msisdn:    msisdn,
-		Latitude:  latitude,
-		Longitude: longitude,
-		Name:      name,
-		Address:   address,
+		Chat:          cfg.chat,
+		Msisdn:        msisdn,
+		Latitude:      latitude,
+		Longitude:     longitude,
+		Name:          name,
+		Address:       address,
+		ReplyToID:     cfg.replyToID,
+		ReplyToSender: cfg.replyToSender,
+		ReplyToText:   cfg.replyToText,
+		Mentions:      cfg.mentions,
 	}
 
 	var resp SendMessageResponse
@@ -335,16 +381,22 @@ func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, long
 // The selectableCount limits how many options a user can select (0 means no limit).
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options []string, selectableCount int) (*SendMessageResponse, error) {
+func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options []string, selectableCount int, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendPollMessageRequest{
+		Chat:            cfg.chat,
 		Msisdn:          msisdn,
 		Question:        question,
 		Options:         options,
 		SelectableCount: selectableCount,
+		ReplyToID:       cfg.replyToID,
+		ReplyToSender:   cfg.replyToSender,
+		ReplyToText:     cfg.replyToText,
+		Mentions:        cfg.mentions,
 	}
 
 	var resp SendMessageResponse
@@ -366,10 +418,12 @@ func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options 
 //	resp, err := client.SendSticker(ctx, msisdn, file)
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Reader) (*SendMessageResponse, error) {
+func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Reader, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
+
+	cfg := newSendConfig(opts)
 
 	// Build multipart form
 	var buf bytes.Buffer
@@ -378,6 +432,11 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+
+	// Add chat/reply/mentions context
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 
 	// Add sticker file
@@ -436,16 +495,21 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 // The audio parameter is an io.Reader containing the audio file bytes.
 // If isPTT is true, WhatsApp renders the audio as a voice note bubble.
 // If isViewOnce is true, the media is sent as view-once.
-func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, isPTT, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, isPTT, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
+
+	cfg := newSendConfig(opts)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if isPTT {
 		if err := writer.WriteField("is_ptt", "true"); err != nil {
@@ -506,16 +570,21 @@ func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, 
 // The video parameter is an io.Reader containing the video file bytes.
 // caption is optional. isGif toggles GIF-like rendering. isViewOnce controls
 // view-once behavior.
-func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, caption string, isGif, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, caption string, isGif, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
+
+	cfg := newSendConfig(opts)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if caption != "" {
 		if err := writer.WriteField("caption", caption); err != nil {
@@ -580,16 +649,21 @@ func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, 
 //
 // fileName and caption are optional. When fileName is empty, the gateway uses
 // its own default naming.
-func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Reader, fileName, caption string) (*SendMessageResponse, error) {
+func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Reader, fileName, caption string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
+
+	cfg := newSendConfig(opts)
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if fileName != "" {
 		if err := writer.WriteField("file_name", fileName); err != nil {

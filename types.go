@@ -44,10 +44,24 @@ type WebhookRegisterRequest struct {
 
 // SendMessageTextRequest represents a request to send a text message.
 type SendMessageTextRequest struct {
-	// Msisdn is the recipient's phone number in WhatsApp JID format (e.g., "6281234567890@s.whatsapp.net")
-	Msisdn string `json:"msisdn"`
+	// Chat is the canonical recipient: a bare number, a user JID
+	// ("@s.whatsapp.net"), a group JID ("@g.us"), or a "@lid". When both Chat
+	// and Msisdn are set, the gateway resolves Chat.
+	Chat string `json:"chat,omitempty"`
+	// Msisdn is the recipient in WhatsApp JID format.
+	//
+	// Deprecated: use Chat. Msisdn remains a permanent back-compat alias.
+	Msisdn string `json:"msisdn,omitempty"`
 	// Message is the text content to send
 	Message string `json:"message"`
+	// ReplyToID quotes an existing message by ID (optional).
+	ReplyToID string `json:"reply_to_id,omitempty"`
+	// ReplyToSender is the number/JID of the quoted message's author (optional).
+	ReplyToSender string `json:"reply_to_sender,omitempty"`
+	// ReplyToText is an optional caller-supplied preview of the quoted message.
+	ReplyToText string `json:"reply_to_text,omitempty"`
+	// Mentions are the numbers/JIDs to @-tag (optional).
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // SendMessageResponse represents the response from sending a message.
@@ -66,12 +80,18 @@ type SendMessageResponse struct {
 	Status string `json:"status,omitempty"`
 	// JobID identifies the queued job in queue mode; poll it with GetJobStatus
 	JobID string `json:"job_id,omitempty"`
+	// Chat is the resolved canonical recipient JID the gateway addressed.
+	Chat string `json:"chat"`
 }
 
 // SendLocationMessageRequest represents a request to send a location message.
 type SendLocationMessageRequest struct {
-	// Msisdn is the recipient's phone number in WhatsApp JID format
-	Msisdn string `json:"msisdn"`
+	// Chat is the canonical recipient (see SendMessageTextRequest.Chat).
+	Chat string `json:"chat,omitempty"`
+	// Msisdn is the recipient in WhatsApp JID format.
+	//
+	// Deprecated: use Chat. Msisdn remains a permanent back-compat alias.
+	Msisdn string `json:"msisdn,omitempty"`
 	// Latitude is the geographic latitude of the location
 	Latitude float64 `json:"latitude"`
 	// Longitude is the geographic longitude of the location
@@ -80,18 +100,38 @@ type SendLocationMessageRequest struct {
 	Name string `json:"name,omitempty"`
 	// Address is the optional address of the location
 	Address string `json:"address,omitempty"`
+	// ReplyToID quotes an existing message by ID (optional).
+	ReplyToID string `json:"reply_to_id,omitempty"`
+	// ReplyToSender is the number/JID of the quoted message's author (optional).
+	ReplyToSender string `json:"reply_to_sender,omitempty"`
+	// ReplyToText is an optional caller-supplied preview of the quoted message.
+	ReplyToText string `json:"reply_to_text,omitempty"`
+	// Mentions are the numbers/JIDs to @-tag (optional).
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // SendPollMessageRequest represents a request to send a poll message.
 type SendPollMessageRequest struct {
-	// Msisdn is the recipient's phone number in WhatsApp JID format
-	Msisdn string `json:"msisdn"`
+	// Chat is the canonical recipient (see SendMessageTextRequest.Chat).
+	Chat string `json:"chat,omitempty"`
+	// Msisdn is the recipient in WhatsApp JID format.
+	//
+	// Deprecated: use Chat. Msisdn remains a permanent back-compat alias.
+	Msisdn string `json:"msisdn,omitempty"`
 	// Question is the poll question text
 	Question string `json:"question"`
 	// Options is the list of poll options
 	Options []string `json:"options"`
 	// SelectableCount is the optional maximum number of options a user can select
 	SelectableCount int `json:"selectable_count,omitempty"`
+	// ReplyToID quotes an existing message by ID (optional).
+	ReplyToID string `json:"reply_to_id,omitempty"`
+	// ReplyToSender is the number/JID of the quoted message's author (optional).
+	ReplyToSender string `json:"reply_to_sender,omitempty"`
+	// ReplyToText is an optional caller-supplied preview of the quoted message.
+	ReplyToText string `json:"reply_to_text,omitempty"`
+	// Mentions are the numbers/JIDs to @-tag (optional).
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // MessageDeleteRequest represents a request to delete a previously sent message.

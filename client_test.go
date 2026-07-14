@@ -2308,6 +2308,88 @@ func TestGetJobStatus_RequiresAuth(t *testing.T) {
 	}
 }
 
+func TestSendText_ChatReplyMentions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/text" {
+			t.Errorf("expected path /api/v1/message/text, got %s", r.URL.Path)
+		}
+		var body SendMessageTextRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode body: %v", err)
+		}
+		// Both chat and msisdn are transmitted; the gateway resolves chat.
+		if body.Chat != "123@g.us" {
+			t.Errorf("expected chat 123@g.us, got %q", body.Chat)
+		}
+		if body.Msisdn != "628@s.whatsapp.net" {
+			t.Errorf("expected msisdn to still be sent, got %q", body.Msisdn)
+		}
+		if body.ReplyToID != "msg_1" || body.ReplyToSender != "628@s.whatsapp.net" || body.ReplyToText != "hi there" {
+			t.Errorf("unexpected reply fields: %+v", body)
+		}
+		if len(body.Mentions) != 2 || body.Mentions[0] != "111" || body.Mentions[1] != "222" {
+			t.Errorf("unexpected mentions: %v", body.Mentions)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "msg_out", Chat: "123@g.us"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.SendText(context.Background(), "628@s.whatsapp.net", "Hello!",
+		WithChat("123@g.us"),
+		WithReply("msg_1", "628@s.whatsapp.net", "hi there"),
+		WithMentions("111", "222"),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Chat != "123@g.us" {
+		t.Errorf("expected resolved chat 123@g.us in response, got %q", resp.Chat)
+	}
+}
+
+func TestSendImage_ChatReplyMentions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Fatalf("failed to parse multipart form: %v", err)
+		}
+		if r.FormValue("chat") != "123@g.us" {
+			t.Errorf("expected chat 123@g.us, got %q", r.FormValue("chat"))
+		}
+		if r.FormValue("msisdn") != "628@s.whatsapp.net" {
+			t.Errorf("expected msisdn to still be sent, got %q", r.FormValue("msisdn"))
+		}
+		if r.FormValue("reply_to_id") != "msg_1" || r.FormValue("reply_to_sender") != "628@s.whatsapp.net" || r.FormValue("reply_to_text") != "hi" {
+			t.Errorf("unexpected reply fields")
+		}
+		// mentions must be REPEATED form parts, not comma-joined.
+		mentions := r.MultipartForm.Value["mentions"]
+		if len(mentions) != 2 || mentions[0] != "111" || mentions[1] != "222" {
+			t.Errorf("expected two repeated mentions parts, got %v", mentions)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "img_out", Chat: "123@g.us"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	image := &mockImageReader{data: []byte("fake image data")}
+	resp, err := client.SendImage(context.Background(), "628@s.whatsapp.net", image, "", false,
+		WithChat("123@g.us"),
+		WithReply("msg_1", "628@s.whatsapp.net", "hi"),
+		WithMentions("111", "222"),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Chat != "123@g.us" {
+		t.Errorf("expected resolved chat 123@g.us in response, got %q", resp.Chat)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
