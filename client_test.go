@@ -2661,6 +2661,80 @@ func TestReadMethods_RequireAuth(t *testing.T) {
 	}
 }
 
+func TestMarkRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/message/read" || r.Method != http.MethodPost {
+			t.Errorf("expected POST /api/v1/message/read, got %s %s", r.Method, r.URL.Path)
+		}
+		var body MarkReadRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode body: %v", err)
+		}
+		if body.Chat != "12@g.us" || body.Sender != "628@s.whatsapp.net" {
+			t.Errorf("unexpected chat/sender: %+v", body)
+		}
+		if len(body.MessageIDs) != 2 || body.MessageIDs[0] != "m1" {
+			t.Errorf("unexpected message_ids: %v", body.MessageIDs)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SuccessResponse{Success: true})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	if err := client.MarkRead(context.Background(), "12@g.us", []string{"m1", "m2"}, "628@s.whatsapp.net"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMarkRead_ErrorMapping(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "sender required for group", "code": 400})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	err := client.MarkRead(context.Background(), "12@g.us", []string{"m1"}, "")
+	if !IsBadRequest(err) {
+		t.Errorf("expected ErrBadRequest, got %v", err)
+	}
+}
+
+func TestSendChatPresence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/chat/presence" || r.Method != http.MethodPost {
+			t.Errorf("expected POST /api/v1/chat/presence, got %s %s", r.Method, r.URL.Path)
+		}
+		var body ChatPresenceRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode body: %v", err)
+		}
+		if body.Chat != "628@s.whatsapp.net" || body.State != PresenceComposing {
+			t.Errorf("unexpected body: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SuccessResponse{Success: true})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	if err := client.SendChatPresence(context.Background(), "628@s.whatsapp.net", PresenceComposing); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTwoWayPrimitives_RequireAuth(t *testing.T) {
+	client := NewClient()
+	if err := client.MarkRead(context.Background(), "628", []string{"m1"}, ""); err != ErrNotAuthenticated {
+		t.Errorf("MarkRead: expected ErrNotAuthenticated, got %v", err)
+	}
+	if err := client.SendChatPresence(context.Background(), "628", PresencePaused); err != ErrNotAuthenticated {
+		t.Errorf("SendChatPresence: expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

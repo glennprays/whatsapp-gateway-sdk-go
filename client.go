@@ -921,6 +921,45 @@ func (c *Client) GetGroupInfo(ctx context.Context, chat string) (*GroupInfoRespo
 	return &resp, nil
 }
 
+// MarkRead marks one or more messages in a chat as read (blue ticks).
+//
+// chat is the canonical recipient. sender is the message author's JID/number and
+// is required for group chats (pass "" for one-to-one chats).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) MarkRead(ctx context.Context, chat string, messageIDs []string, sender string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	reqBody := MarkReadRequest{
+		Chat:       chat,
+		MessageIDs: messageIDs,
+		Sender:     sender,
+	}
+
+	var resp SuccessResponse
+	return c.doRequest(ctx, http.MethodPost, "/message/read", reqBody, &resp, true)
+}
+
+// SendChatPresence sets the typing indicator in a chat. state must be one of
+// PresenceComposing ("typing…"), PresenceRecording ("recording audio…"), or
+// PresencePaused (cleared).
+//
+// chat is the canonical recipient.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SendChatPresence(ctx context.Context, chat, state string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	reqBody := ChatPresenceRequest{Chat: chat, State: state}
+
+	var resp SuccessResponse
+	return c.doRequest(ctx, http.MethodPost, "/chat/presence", reqBody, &resp, true)
+}
+
 // GetIncomingMessages fetches the most recent incoming messages buffered by the
 // gateway for the authenticated session, newest first.
 //
