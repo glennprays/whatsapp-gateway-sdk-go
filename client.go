@@ -1077,6 +1077,194 @@ func (c *Client) SetGroupTopic(ctx context.Context, chat, topic string) error {
 	return c.doRequest(ctx, http.MethodPatch, "/group/topic", body, nil, true)
 }
 
+// SetGroupPhoto sets a group's photo from a JPEG stream. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupPhoto(ctx context.Context, chat string, jpeg io.Reader) (*GroupPhotoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if err := writer.WriteField("chat", chat); err != nil {
+		return nil, fmt.Errorf("failed to write chat field: %w", err)
+	}
+	part, err := writer.CreateFormFile("photo", "photo.jpg")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create photo form file: %w", err)
+	}
+	if _, err := io.Copy(part, jpeg); err != nil {
+		return nil, fmt.Errorf("failed to copy photo data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/group/photo", &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
+	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(respBody, resp.StatusCode, resp.Header.Get(TraceIDHeader))
+	}
+
+	var result GroupPhotoResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &result, nil
+}
+
+// DeleteGroupPhoto removes a group's photo. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) DeleteGroupPhoto(ctx context.Context, chat string) (*GroupPhotoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/photo?chat=" + url.QueryEscape(chat)
+	var resp GroupPhotoResponse
+	if err := c.doRequest(ctx, http.MethodDelete, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInviteLink returns a group's admin invite link. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInviteLink(ctx context.Context, chat string) (*GroupInviteLinkResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/invite?chat=" + url.QueryEscape(chat)
+	var resp GroupInviteLinkResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ResetGroupInviteLink revokes a group's current invite link and returns a
+// freshly generated one. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ResetGroupInviteLink(ctx context.Context, chat string) (*GroupInviteLinkResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+	}{chat}
+	var resp GroupInviteLinkResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/invite/reset", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInviteInfo previews the group behind an invite code without joining.
+// code accepts a full chat.whatsapp.com link or a bare code. A revoked link
+// returns an error matching ErrGone (410) — check with errors.Is(err, waga.ErrGone).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInviteInfo(ctx context.Context, code string) (*GroupInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/invite/info?code=" + url.QueryEscape(code)
+	var resp GroupInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// JoinGroup joins a group by invite code (a full chat.whatsapp.com link or a
+// bare code). This mass-join vector is gated server-side by
+// GROUP_JOIN_VIA_LINK_ENABLED (403 when disabled).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) JoinGroup(ctx context.Context, code string) (*JoinGroupResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Code string `json:"code"`
+	}{code}
+	var resp JoinGroupResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/join", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListJoinRequests lists a group's pending join requests. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListJoinRequests(ctx context.Context, chat string) (*GroupJoinRequestsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/requests?chat=" + url.QueryEscape(chat)
+	var resp GroupJoinRequestsResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ReviewJoinRequests approves or rejects pending join requests. action is
+// "approve" or "reject". chat must be a group JID ("@g.us").
+//
+// Partial success is a 200: inspect the returned Results for each participant.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ReviewJoinRequests(ctx context.Context, chat, action string, participants []string) (*GroupJoinRequestsActionResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat         string   `json:"chat"`
+		Action       string   `json:"action"`
+		Participants []string `json:"participants"`
+	}{chat, action, participants}
+
+	var resp GroupJoinRequestsActionResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/requests", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // GetIncomingMessages fetches the most recent incoming messages buffered by the
 // gateway for the authenticated session, newest first.
 //

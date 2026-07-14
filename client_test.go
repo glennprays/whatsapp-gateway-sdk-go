@@ -2883,6 +2883,183 @@ func TestSetGroupNameAndTopic(t *testing.T) {
 	}
 }
 
+func TestSetGroupPhoto(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/group/photo" {
+			t.Errorf("expected PUT /api/v1/group/photo, got %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if r.FormValue("chat") != "12@g.us" {
+			t.Errorf("expected chat 12@g.us, got %q", r.FormValue("chat"))
+		}
+		if _, _, err := r.FormFile("photo"); err != nil {
+			t.Errorf("expected photo file part: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupPhotoResponse{PictureID: "pic_9"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.SetGroupPhoto(context.Background(), "12@g.us", &mockImageReader{data: []byte("jpeg")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.PictureID != "pic_9" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestDeleteGroupPhoto(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/group/photo" {
+			t.Errorf("expected DELETE /api/v1/group/photo, got %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("chat") != "12@g.us" {
+			t.Errorf("expected chat=12@g.us, got %q", r.URL.Query().Get("chat"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupPhotoResponse{Removed: true})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.DeleteGroupPhoto(context.Background(), "12@g.us")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Removed {
+		t.Errorf("expected removed true, got %+v", resp)
+	}
+}
+
+func TestGroupInviteLinkAndReset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/group/invite":
+			if r.Method != http.MethodGet || r.URL.Query().Get("chat") != "12@g.us" {
+				t.Errorf("unexpected invite get: %s %s", r.Method, r.URL.RawQuery)
+			}
+			json.NewEncoder(w).Encode(GroupInviteLinkResponse{Chat: "12@g.us", InviteLink: "https://chat.whatsapp.com/aaa"})
+		case "/api/v1/group/invite/reset":
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST reset, got %s", r.Method)
+			}
+			json.NewEncoder(w).Encode(GroupInviteLinkResponse{Chat: "12@g.us", InviteLink: "https://chat.whatsapp.com/bbb"})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	link, err := client.GetGroupInviteLink(context.Background(), "12@g.us")
+	if err != nil || link.InviteLink != "https://chat.whatsapp.com/aaa" {
+		t.Fatalf("GetGroupInviteLink: %v %+v", err, link)
+	}
+	reset, err := client.ResetGroupInviteLink(context.Background(), "12@g.us")
+	if err != nil || reset.InviteLink != "https://chat.whatsapp.com/bbb" {
+		t.Fatalf("ResetGroupInviteLink: %v %+v", err, reset)
+	}
+}
+
+func TestGetGroupInviteInfo_Gone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/invite/info" || r.URL.Query().Get("code") != "abc" {
+			t.Errorf("unexpected request: %s %s", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "invite revoked", "code": 410})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	_, err := client.GetGroupInviteInfo(context.Background(), "abc")
+	if !IsGone(err) {
+		t.Errorf("expected ErrGone (410), got %v", err)
+	}
+}
+
+func TestGetGroupInviteInfo_OK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupInfoResponse{JID: "12@g.us", Name: "Preview"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	info, err := client.GetGroupInviteInfo(context.Background(), "https://chat.whatsapp.com/abc")
+	if err != nil || info.Name != "Preview" {
+		t.Fatalf("unexpected: %v %+v", err, info)
+	}
+}
+
+func TestJoinGroup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/join" || r.Method != http.MethodPost {
+			t.Errorf("expected POST /api/v1/group/join, got %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["code"] != "abc" {
+			t.Errorf("expected code abc, got %q", body["code"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(JoinGroupResponse{GroupJID: "12@g.us"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.JoinGroup(context.Background(), "abc")
+	if err != nil || resp.GroupJID != "12@g.us" {
+		t.Fatalf("unexpected: %v %+v", err, resp)
+	}
+}
+
+func TestListAndReviewJoinRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Path != "/api/v1/group/requests" || r.URL.Query().Get("chat") != "12@g.us" {
+				t.Errorf("unexpected list request: %s %s", r.URL.Path, r.URL.RawQuery)
+			}
+			json.NewEncoder(w).Encode(GroupJoinRequestsResponse{
+				Chat: "12@g.us", Count: 1,
+				Requests: []GroupJoinRequestItem{{JID: "628@s.whatsapp.net", RequestedAt: "2026-07-15T00:00:00Z"}},
+			})
+		case http.MethodPost:
+			var body struct {
+				Action       string   `json:"action"`
+				Participants []string `json:"participants"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			if body.Action != "approve" || len(body.Participants) != 1 {
+				t.Errorf("unexpected review body: %+v", body)
+			}
+			json.NewEncoder(w).Encode(GroupJoinRequestsActionResponse{
+				Chat: "12@g.us", Action: "approve",
+				Results: []ParticipantResult{{JID: "628@s.whatsapp.net", Status: "ok"}},
+			})
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	list, err := client.ListJoinRequests(context.Background(), "12@g.us")
+	if err != nil || list.Count != 1 || list.Requests[0].JID != "628@s.whatsapp.net" {
+		t.Fatalf("ListJoinRequests: %v %+v", err, list)
+	}
+	rev, err := client.ReviewJoinRequests(context.Background(), "12@g.us", "approve", []string{"628"})
+	if err != nil || rev.Results[0].Status != "ok" {
+		t.Fatalf("ReviewJoinRequests: %v %+v", err, rev)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
