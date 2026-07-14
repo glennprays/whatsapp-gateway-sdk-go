@@ -74,6 +74,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   liveness, no secret), `Ready` (root readiness — returns the structured body for
   both `ready`/200 and `not_ready`/503).
 
+### Fixed
+- Error responses now surface their message even when the gateway serializes the
+  Go field names `{"Status","Message"}` instead of the documented
+  `{"error","code"}` (older gateway builds) — previously the message was dropped.
+- `ParseWebhook` no longer drops the `message.failed` failure reason
+  (`OutgoingWebhookPayload.Error`) or the incoming `addressing_mode`.
+- Media-send retries with the same `Idempotency-Key` now build a byte-identical
+  request body (deterministic multipart boundary), so the gateway replays the
+  original response instead of rejecting the retry as a body mismatch (422).
+
 ## [0.6.0] - 2026-07-05
 
 ### Added
