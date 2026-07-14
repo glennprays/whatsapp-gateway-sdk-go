@@ -474,6 +474,97 @@ err := client.SendChatPresence(ctx, recipient, waga.PresenceComposing) // typing
 // ... waga.PresenceRecording (voice note) / waga.PresencePaused (cleared)
 ```
 
+## Group & Community Management
+
+Every group/community method requires an explicit group JID (`@g.us`); a bare
+number or user JID is rejected with `400`. These endpoints are gated server-side
+by `GROUP_MANAGEMENT_ENABLED` (the whole mutation surface returns `404` when the
+gateway disables it). Batch operations return `200` with a per-participant
+`Results` slice — a single bad member is reported there, not as an overall error.
+
+```go
+// Create a group (or a community with IsCommunity: true).
+grp, err := client.CreateGroup(ctx, waga.CreateGroupRequest{
+    Name:         "Project X",
+    Participants: []string{"6281111111111", "6282222222222"},
+})
+
+// Roster mutations: add | remove | promote | demote.
+res, err := client.UpdateGroupParticipants(ctx, grp.GroupJID, "add", []string{"6283333333333"})
+for _, r := range res.Results {
+    fmt.Println(r.JID, r.Status) // ok | invited (privacy-blocked add) | failed
+}
+
+// Settings, name, topic.
+announce := true
+client.SetGroupSettings(ctx, grp.GroupJID, &announce, nil) // ≥1 non-nil flag
+client.SetGroupName(ctx, grp.GroupJID, "Project X — Q3")   // ≤25 chars
+client.SetGroupTopic(ctx, grp.GroupJID, "")                // ≤512; empty clears
+
+// Photo (multipart JPEG).
+f, _ := os.Open("group.jpg")
+defer f.Close()
+client.SetGroupPhoto(ctx, grp.GroupJID, f)
+client.DeleteGroupPhoto(ctx, grp.GroupJID)
+
+// Invite links.
+link, _ := client.GetGroupInviteLink(ctx, grp.GroupJID)
+client.ResetGroupInviteLink(ctx, grp.GroupJID) // revoke + regenerate
+
+// Preview a link without joining (a revoked link matches ErrGone).
+info, err := client.GetGroupInviteInfo(ctx, "https://chat.whatsapp.com/XXXX")
+if errors.Is(err, waga.ErrGone) {
+    // link revoked
+}
+client.JoinGroup(ctx, "https://chat.whatsapp.com/XXXX") // gated by GROUP_JOIN_VIA_LINK_ENABLED
+
+// Pending join requests.
+reqs, _ := client.ListJoinRequests(ctx, grp.GroupJID)
+client.ReviewJoinRequests(ctx, grp.GroupJID, "approve", []string{"6284444444444"}) // approve | reject
+
+// Communities.
+client.LinkSubGroup(ctx, communityJID, subGroupJID)
+client.UnlinkSubGroup(ctx, communityJID, subGroupJID)
+subs, _ := client.ListSubGroups(ctx, communityJID)
+members, _ := client.ListCommunityParticipants(ctx, communityJID)
+```
+
+Read-only group/community methods (`ListGroups`, `GetGroupInfo`, `ListSubGroups`,
+`ListCommunityParticipants`) stay available even when mutations are disabled.
+
+## Admin Module
+
+The gateway's operator-only admin plane is exposed as a **separate, opt-in
+client** so tenant code can't accidentally reach it. It is served at the server
+**root** (not under `/api/v1`) and is bearer-gated by the gateway's
+`ADMIN_API_SECRET` (the plane returns `404` when that secret is unset).
+
+Construct it with `NewAdminClient`, pointing `WithBaseURL` at the gateway origin
+and passing the admin secret via `WithAdminSecret`:
+
+```go
+admin := waga.NewAdminClient(
+    waga.WithBaseURL("https://gateway.example.com"), // server ROOT, no /api/v1
+    waga.WithAdminSecret(os.Getenv("ADMIN_API_SECRET")),
+)
+
+// Per-instance session inventory (masked phones, honest states, hostname).
+inv, err := admin.Sessions(ctx)
+for _, s := range inv.Sessions {
+    fmt.Println(s.PhoneMasked, s.State)
+}
+
+// One account (ErrNotFound if unknown).
+one, err := admin.Session(ctx, "6281234567890")
+
+// Root health probes (no admin secret required).
+live, _ := admin.Live(ctx)   // always 200 for a running process
+ready, err := admin.Ready(ctx)
+if err == nil && ready.Status != "ready" {
+    // not_ready (HTTP 503): DB or queue down — the body is still returned
+}
+```
+
 ## Job Status
 
 When the gateway runs in queue mode, send methods return a job ID instead of a
@@ -698,6 +789,7 @@ if err != nil {
 | `ErrForbidden` | 403 | No permission for this action |
 | `ErrNotFound` | 404 | Resource not found |
 | `ErrConflict` | 409 | Resource conflict |
+| `ErrGone` | 410 | Resource gone (e.g. revoked group invite link) |
 | `ErrNotModified` | 304 | `GetAvatar` — picture unchanged (conditional fetch) |
 | `ErrRateLimited` | 429 | Too many requests |
 | `ErrInternalServer` | 500 | Server error |

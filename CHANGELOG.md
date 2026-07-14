@@ -52,6 +52,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SendChatPresence(ctx, chat, state)` → `POST /chat/presence` with the
     `PresenceComposing` / `PresenceRecording` / `PresencePaused` states.
 - New `ErrNotModified` sentinel (returned by `GetAvatar` on a 304).
+- **Group & community management** (all require an explicit `@g.us` chat JID;
+  batch ops return 200 with a per-participant `Results` slice, never failing the
+  whole request on one bad member):
+  - `CreateGroup`, `LeaveGroup`, `UpdateGroupParticipants`
+    (add/remove/promote/demote), `SetGroupSettings`, `SetGroupName`,
+    `SetGroupTopic`.
+  - `SetGroupPhoto` (multipart JPEG) / `DeleteGroupPhoto`; `GetGroupInviteLink` /
+    `ResetGroupInviteLink`; `GetGroupInviteInfo` (preview by code — a revoked link
+    returns an error matching the new `ErrGone` (410) sentinel); `JoinGroup`;
+    `ListJoinRequests` / `ReviewJoinRequests` (approve/reject).
+  - Community: `LinkSubGroup` / `UnlinkSubGroup`, `ListSubGroups`,
+    `ListCommunityParticipants`.
+  - New `ErrGone` sentinel + `IsGone` helper (410).
+- **Opt-in admin module.** `NewAdminClient(opts...)` builds a separate,
+  operator-only client for the gateway's admin plane (kept off the tenant
+  `Client` so tenant code can't reach it). It defaults to the server ROOT
+  (`DefaultAdminBaseURL`, not `/api/v1`) and sends the admin secret — supplied via
+  `WithAdminSecret` (or `WithToken`) — as `Authorization: Bearer <secret>`.
+  Methods: `Sessions`, `Session(phone)` (404→`ErrNotFound`), `Live` (root
+  liveness, no secret), `Ready` (root readiness — returns the structured body for
+  both `ready`/200 and `not_ready`/503).
 
 ## [0.6.0] - 2026-07-05
 
