@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"testing"
 )
 
@@ -635,5 +636,122 @@ func TestParseIncomingWebhook_StickerMedia(t *testing.T) {
 	}
 	if webhook.Media.StorageURL != "https://gw.example/storage/abc.webp" {
 		t.Errorf("unexpected storage_url: %q", webhook.Media.StorageURL)
+	}
+}
+
+func TestParseWebhook_Dispatch(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	tests := []struct {
+		name    string
+		payload string
+		want    WebhookEventType
+		check   func(t *testing.T, ev *WebhookEvent)
+	}{
+		{
+			name:    "incoming",
+			payload: `{"event":"message.incoming","from":"628@s.whatsapp.net","type":"text","text":"hi","timestamp":1625247600}`,
+			want:    WebhookEventMessageIncoming,
+			check: func(t *testing.T, ev *WebhookEvent) {
+				if ev.Incoming == nil || ev.Outgoing != nil || ev.Session != nil {
+					t.Fatalf("expected only Incoming set, got %+v", ev)
+				}
+				if ev.Incoming.Text != "hi" {
+					t.Errorf("expected text hi, got %q", ev.Incoming.Text)
+				}
+			},
+		},
+		{
+			name:    "sent",
+			payload: `{"event":"message.sent","job_id":"job_1","message_id":"m1","timestamp":1625247600}`,
+			want:    WebhookEventMessageSent,
+			check: func(t *testing.T, ev *WebhookEvent) {
+				if ev.Outgoing == nil || ev.Incoming != nil || ev.Session != nil {
+					t.Fatalf("expected only Outgoing set, got %+v", ev)
+				}
+				if ev.Outgoing.JobId != "job_1" {
+					t.Errorf("expected job_id job_1, got %q", ev.Outgoing.JobId)
+				}
+			},
+		},
+		{
+			name:    "connected",
+			payload: `{"event":"session.connected","phone_number":"628","jid":"628:1@s.whatsapp.net","timestamp":1625247600}`,
+			want:    WebhookEventSessionConnected,
+			check: func(t *testing.T, ev *WebhookEvent) {
+				if ev.Session == nil || ev.Incoming != nil || ev.Outgoing != nil {
+					t.Fatalf("expected only Session set, got %+v", ev)
+				}
+				if ev.Session.PhoneNumber != "628" || ev.Session.JID != "628:1@s.whatsapp.net" {
+					t.Errorf("unexpected session envelope: %+v", ev.Session)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := []byte(tt.payload)
+			ev, err := verifier.ParseWebhook(payload, ComputeSignature(payload, secret))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ev.Event != tt.want {
+				t.Errorf("expected event %s, got %s", tt.want, ev.Event)
+			}
+			tt.check(t, ev)
+		})
+	}
+}
+
+func TestParseWebhook_SessionBannedExtras(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	payload := []byte(`{
+		"event": "session.banned",
+		"phone_number": "628",
+		"jid": "628:1@s.whatsapp.net",
+		"timestamp": 1625247600,
+		"code": 401,
+		"reason_text": "banned",
+		"expires_in": 86400
+	}`)
+
+	ev, err := verifier.ParseWebhook(payload, ComputeSignature(payload, secret))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ev.Session == nil {
+		t.Fatal("expected Session payload")
+	}
+	if ev.Session.Code != 401 {
+		t.Errorf("expected code 401, got %d", ev.Session.Code)
+	}
+	if ev.Session.ReasonText != "banned" {
+		t.Errorf("expected reason_text banned, got %q", ev.Session.ReasonText)
+	}
+	if ev.Session.ExpiresIn != 86400 {
+		t.Errorf("expected expires_in 86400, got %d", ev.Session.ExpiresIn)
+	}
+}
+
+func TestParseWebhook_UnknownEvent(t *testing.T) {
+	secret := "my_hmac_secret"
+	verifier := NewWebhookVerifier(secret)
+
+	payload := []byte(`{"event":"session.exploded","phone_number":"628"}`)
+	_, err := verifier.ParseWebhook(payload, ComputeSignature(payload, secret))
+	if !errors.Is(err, ErrUnknownWebhookEvent) {
+		t.Errorf("expected ErrUnknownWebhookEvent, got %v", err)
+	}
+}
+
+func TestParseWebhook_InvalidSignature(t *testing.T) {
+	verifier := NewWebhookVerifier("secret")
+	_, err := verifier.ParseWebhook([]byte(`{"event":"message.incoming"}`), "sha256=invalid")
+	if err != ErrInvalidSignature {
+		t.Errorf("expected ErrInvalidSignature, got %v", err)
 	}
 }

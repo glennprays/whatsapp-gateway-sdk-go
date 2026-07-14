@@ -61,6 +61,9 @@ var (
 	ErrInternalServer = &SDKError{Code: http.StatusInternalServerError, Message: "internal server error"}
 	// ErrInvalidSignature is returned when webhook signature verification fails
 	ErrInvalidSignature = errors.New("invalid webhook signature")
+	// ErrUnknownWebhookEvent is returned by ParseWebhook when the payload's
+	// event field is not a recognized webhook event type.
+	ErrUnknownWebhookEvent = errors.New("unknown webhook event")
 	// ErrNotAuthenticated is returned when trying to use an authenticated method without setting a token
 	ErrNotAuthenticated = errors.New("client not authenticated, call Register() or SetToken() first")
 )

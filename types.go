@@ -377,3 +377,82 @@ type JobStatusResponse struct {
 	// CompletedAt is when the job finished, if it has
 	CompletedAt *string `json:"completed_at,omitempty"`
 }
+
+// WebhookEventType is the type discriminator carried by every webhook envelope's
+// "event" field. It is the single catalog ParseWebhook dispatches on and mirrors
+// the gateway's domain/queue.StatusWebhookEvent.
+type WebhookEventType string
+
+const (
+	// WebhookEventMessageIncoming is emitted for a received message.
+	WebhookEventMessageIncoming WebhookEventType = "message.incoming"
+	// WebhookEventMessageQueued is emitted when a message is queued.
+	WebhookEventMessageQueued WebhookEventType = "message.queued"
+	// WebhookEventMessageSent is emitted when a message is sent.
+	WebhookEventMessageSent WebhookEventType = "message.sent"
+	// WebhookEventMessageFailed is emitted when a message fails to send.
+	WebhookEventMessageFailed WebhookEventType = "message.failed"
+
+	// WebhookEventSessionLoggedOut is emitted when the account is logged out.
+	WebhookEventSessionLoggedOut WebhookEventType = "session.logged_out"
+	// WebhookEventSessionBanned is emitted when the account is temporarily banned.
+	WebhookEventSessionBanned WebhookEventType = "session.banned"
+	// WebhookEventSessionConnectFailure is emitted on a connection failure.
+	WebhookEventSessionConnectFailure WebhookEventType = "session.connect_failure"
+	// WebhookEventSessionConnected is emitted when the session connects.
+	WebhookEventSessionConnected WebhookEventType = "session.connected"
+	// WebhookEventSessionDisconnected is emitted when the session disconnects.
+	WebhookEventSessionDisconnected WebhookEventType = "session.disconnected"
+	// WebhookEventSessionReplaced is emitted when another process takes the socket.
+	WebhookEventSessionReplaced WebhookEventType = "session.replaced"
+)
+
+// SessionEvent is the flat envelope the gateway emits for session.* lifecycle
+// events. The envelope fields (Event, PhoneNumber, JID, Timestamp) are always
+// present; the remaining fields are event-specific extras and are zero when the
+// event does not carry them:
+//   - session.logged_out:      OnConnect, Reason, ReasonText
+//   - session.banned:          Code, ReasonText, ExpiresIn
+//   - session.connect_failure: Reason, ReasonText, Message
+//   - session.connected / disconnected / replaced: envelope only
+type SessionEvent struct {
+	// Event is the session.* event type.
+	Event WebhookEventType `json:"event"`
+	// PhoneNumber is the account the event concerns.
+	PhoneNumber string `json:"phone_number"`
+	// JID is the account's device JID.
+	JID string `json:"jid"`
+	// Timestamp is the Unix timestamp of the event.
+	Timestamp int64 `json:"timestamp"`
+
+	// OnConnect (session.logged_out) is true when the logout happened while
+	// (re)connecting rather than via an explicit remote logout.
+	OnConnect bool `json:"on_connect,omitempty"`
+	// Reason (session.logged_out, session.connect_failure) is the numeric reason code.
+	Reason int `json:"reason,omitempty"`
+	// ReasonText (session.logged_out, session.banned, session.connect_failure)
+	// is the human-readable reason.
+	ReasonText string `json:"reason_text,omitempty"`
+	// Code (session.banned) is the numeric ban code.
+	Code int `json:"code,omitempty"`
+	// ExpiresIn (session.banned) is the ban duration in seconds.
+	ExpiresIn int `json:"expires_in,omitempty"`
+	// Message (session.connect_failure) is the failure message.
+	Message string `json:"message,omitempty"`
+}
+
+// WebhookEvent is the discriminated result of ParseWebhook. Exactly one of the
+// payload pointers is non-nil, selected by Event:
+//   - Incoming: message.incoming
+//   - Outgoing: message.queued / message.sent / message.failed
+//   - Session:  session.*
+type WebhookEvent struct {
+	// Event is the parsed event type.
+	Event WebhookEventType
+	// Incoming is set for message.incoming.
+	Incoming *IncomingWebhookPayload
+	// Outgoing is set for message.queued / message.sent / message.failed.
+	Outgoing *OutgoingWebhookPayload
+	// Session is set for session.* events.
+	Session *SessionEvent
+}

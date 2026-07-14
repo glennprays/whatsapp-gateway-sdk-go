@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -116,6 +117,69 @@ func (v *WebhookVerifier) ParseOutgoingWebhook(payload []byte, signature string)
 	}
 
 	return &webhook, nil
+}
+
+// ParseWebhook verifies a webhook payload's signature, then inspects its "event"
+// field and decodes it into a discriminated WebhookEvent covering every event
+// the gateway emits: message.incoming (Incoming), message.queued/sent/failed
+// (Outgoing), and the session.* lifecycle events (Session). Exactly one of the
+// WebhookEvent payload pointers is non-nil.
+//
+// Use this when a single endpoint receives every webhook type. The narrower
+// ParseIncomingWebhook / ParseOutgoingWebhook remain available.
+//
+// An unrecognized event yields an error wrapping ErrUnknownWebhookEvent; an
+// invalid signature yields ErrInvalidSignature.
+//
+// Example:
+//
+//	ev, err := verifier.ParseWebhook(body, signature)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	switch ev.Event {
+//	case waga.WebhookEventMessageIncoming:
+//	    fmt.Println("from", ev.Incoming.From)
+//	case waga.WebhookEventSessionBanned:
+//	    fmt.Println("banned for", ev.Session.ExpiresIn, "seconds")
+//	}
+func (v *WebhookVerifier) ParseWebhook(payload []byte, signature string) (*WebhookEvent, error) {
+	if !v.VerifySignature(payload, signature) {
+		return nil, ErrInvalidSignature
+	}
+
+	var env struct {
+		Event WebhookEventType `json:"event"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, err
+	}
+
+	ev := &WebhookEvent{Event: env.Event}
+	switch env.Event {
+	case WebhookEventMessageIncoming:
+		var p IncomingWebhookPayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		ev.Incoming = &p
+	case WebhookEventMessageQueued, WebhookEventMessageSent, WebhookEventMessageFailed:
+		var p OutgoingWebhookPayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		ev.Outgoing = &p
+	case WebhookEventSessionLoggedOut, WebhookEventSessionBanned, WebhookEventSessionConnectFailure,
+		WebhookEventSessionConnected, WebhookEventSessionDisconnected, WebhookEventSessionReplaced:
+		var p SessionEvent
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil, err
+		}
+		ev.Session = &p
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnknownWebhookEvent, env.Event)
+	}
+	return ev, nil
 }
 
 // ComputeSignature computes the HMAC-SHA256 signature for a webhook payload.
