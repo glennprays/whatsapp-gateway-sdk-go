@@ -207,7 +207,7 @@ func (c *Client) SendText(ctx context.Context, msisdn, message string, opts ...S
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/text", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/text", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -316,6 +316,7 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -368,7 +369,7 @@ func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, long
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/location", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/location", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -400,7 +401,7 @@ func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options 
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/poll", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/poll", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -465,6 +466,7 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -543,6 +545,7 @@ func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -623,6 +626,7 @@ func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -697,6 +701,7 @@ func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Re
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -909,7 +914,7 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 }
 
 // doRequest performs an HTTP request and unmarshals the response
-func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}, requireAuth bool) error {
+func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}, requireAuth bool, headers ...reqHeader) error {
 	var reqBody io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -930,6 +935,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, headers)
 
 	if requireAuth {
 		token := c.GetToken()
@@ -968,6 +974,13 @@ func (c *Client) checkAuth() error {
 		return ErrNotAuthenticated
 	}
 	return nil
+}
+
+// setHeaders applies extra request headers (e.g. Idempotency-Key) to req.
+func setHeaders(req *http.Request, headers []reqHeader) {
+	for _, h := range headers {
+		req.Header.Set(h.key, h.value)
+	}
 }
 
 // Additional response types

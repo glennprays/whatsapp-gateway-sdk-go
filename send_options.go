@@ -40,6 +40,26 @@ func WithMentions(mentions ...string) SendOption {
 	return func(c *sendConfig) { c.mentions = mentions }
 }
 
+// WithIdempotencyKey attaches an Idempotency-Key header to the send. Reusing the
+// same key replays the gateway's original response (200 with Idempotent-Replay:
+// true); an in-flight duplicate returns 409 (ErrConflict) and the same key with
+// a different request body returns 422.
+func WithIdempotencyKey(key string) SendOption {
+	return func(c *sendConfig) { c.idempotencyKey = key }
+}
+
+// reqHeader is a single extra HTTP request header.
+type reqHeader struct{ key, value string }
+
+// headers returns the extra request headers implied by the send config. Only the
+// Idempotency-Key header is emitted, and only when a key was provided.
+func (c sendConfig) headers() []reqHeader {
+	if c.idempotencyKey == "" {
+		return nil
+	}
+	return []reqHeader{{"Idempotency-Key", c.idempotencyKey}}
+}
+
 // newSendConfig folds the given options into a sendConfig.
 func newSendConfig(opts []SendOption) sendConfig {
 	var c sendConfig

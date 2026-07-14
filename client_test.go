@@ -3,6 +3,7 @@ package waga
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -2387,6 +2388,84 @@ func TestSendImage_ChatReplyMentions(t *testing.T) {
 	}
 	if resp.Chat != "123@g.us" {
 		t.Errorf("expected resolved chat 123@g.us in response, got %q", resp.Chat)
+	}
+}
+
+func TestSendText_IdempotencyKey(t *testing.T) {
+	var gotKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("Idempotency-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "msg_1"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+
+	// Key set -> header present.
+	if _, err := client.SendText(context.Background(), "628@s.whatsapp.net", "hi", WithIdempotencyKey("key-abc")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotKey != "key-abc" {
+		t.Errorf("expected Idempotency-Key 'key-abc', got %q", gotKey)
+	}
+
+	// No key -> header absent.
+	if _, err := client.SendText(context.Background(), "628@s.whatsapp.net", "hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotKey != "" {
+		t.Errorf("expected no Idempotency-Key header, got %q", gotKey)
+	}
+}
+
+func TestSendImage_IdempotencyKey(t *testing.T) {
+	var gotKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("Idempotency-Key")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SendMessageResponse{Success: true, MessageId: "img_1"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	image := &mockImageReader{data: []byte("data")}
+	if _, err := client.SendImage(context.Background(), "628@s.whatsapp.net", image, "", false, WithIdempotencyKey("key-img")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotKey != "key-img" {
+		t.Errorf("expected Idempotency-Key 'key-img' on multipart send, got %q", gotKey)
+	}
+}
+
+func TestSendText_IdempotencyConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "a request with this Idempotency-Key is already in progress", "code": 409})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	_, err := client.SendText(context.Background(), "628@s.whatsapp.net", "hi", WithIdempotencyKey("dup"))
+	if !IsConflict(err) {
+		t.Errorf("expected ErrConflict (409), got %v", err)
+	}
+}
+
+func TestSendText_IdempotencyUnprocessable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "Idempotency-Key was reused with a different request body", "code": 422})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	_, err := client.SendText(context.Background(), "628@s.whatsapp.net", "hi", WithIdempotencyKey("reused"))
+	var sdkErr *SDKError
+	if !errors.As(err, &sdkErr) || sdkErr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected SDKError with code 422, got %v", err)
 	}
 }
 
