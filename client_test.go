@@ -3060,6 +3060,84 @@ func TestListAndReviewJoinRequests(t *testing.T) {
 	}
 }
 
+func TestLinkAndUnlinkSubGroup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/community/subgroups" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPost:
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["chat"] != "12@g.us" || body["child_jid"] != "34@g.us" {
+				t.Errorf("unexpected link body: %+v", body)
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"linked": true})
+		case http.MethodDelete:
+			if r.URL.Query().Get("chat") != "12@g.us" || r.URL.Query().Get("child") != "34@g.us" {
+				t.Errorf("unexpected unlink query: %s", r.URL.RawQuery)
+			}
+			json.NewEncoder(w).Encode(map[string]bool{"unlinked": true})
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	if err := client.LinkSubGroup(context.Background(), "12@g.us", "34@g.us"); err != nil {
+		t.Fatalf("LinkSubGroup: %v", err)
+	}
+	if err := client.UnlinkSubGroup(context.Background(), "12@g.us", "34@g.us"); err != nil {
+		t.Fatalf("UnlinkSubGroup: %v", err)
+	}
+}
+
+func TestListSubGroups(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/community/subgroups" || r.URL.Query().Get("chat") != "12@g.us" {
+			t.Errorf("unexpected request: %s %s %s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SubGroupListResponse{
+			SubGroups: []SubGroupItem{{JID: "34@g.us", Name: "Announcements", IsDefaultSubGroup: true}},
+			Count:     1,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.ListSubGroups(context.Background(), "12@g.us")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Count != 1 || !resp.SubGroups[0].IsDefaultSubGroup {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestListCommunityParticipants(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/community/participants" || r.URL.Query().Get("chat") != "12@g.us" {
+			t.Errorf("unexpected request: %s %s", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CommunityParticipantsResponse{
+			Participants: []CommunityParticipantItem{{JID: "628@s.whatsapp.net"}, {JID: "629@lid"}},
+			Count:        2,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.ListCommunityParticipants(context.Background(), "12@g.us")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Count != 2 || resp.Participants[1].JID != "629@lid" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

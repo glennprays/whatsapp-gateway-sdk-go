@@ -1265,6 +1265,69 @@ func (c *Client) ReviewJoinRequests(ctx context.Context, chat, action string, pa
 	return &resp, nil
 }
 
+// LinkSubGroup links a sub-group under a parent community. chat is the parent
+// community JID and childJID is the sub-group JID (both "@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) LinkSubGroup(ctx context.Context, chat, childJID string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat     string `json:"chat"`
+		ChildJID string `json:"child_jid"`
+	}{chat, childJID}
+	return c.doRequest(ctx, http.MethodPost, "/community/subgroups", body, nil, true)
+}
+
+// UnlinkSubGroup unlinks a sub-group from its parent community. chat is the
+// parent community JID and childJID is the sub-group JID (both "@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) UnlinkSubGroup(ctx context.Context, chat, childJID string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	path := "/community/subgroups?chat=" + url.QueryEscape(chat) + "&child=" + url.QueryEscape(childJID)
+	return c.doRequest(ctx, http.MethodDelete, path, nil, nil, true)
+}
+
+// ListSubGroups lists the sub-groups linked under a community. chat must be the
+// community JID ("@g.us"). An empty list is not an error.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListSubGroups(ctx context.Context, chat string) (*SubGroupListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/community/subgroups?chat=" + url.QueryEscape(chat)
+	var resp SubGroupListResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListCommunityParticipants lists every participant across a community's linked
+// groups. chat must be the community JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListCommunityParticipants(ctx context.Context, chat string) (*CommunityParticipantsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/community/participants?chat=" + url.QueryEscape(chat)
+	var resp CommunityParticipantsResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // GetIncomingMessages fetches the most recent incoming messages buffered by the
 // gateway for the authenticated session, newest first.
 //
