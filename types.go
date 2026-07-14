@@ -456,3 +456,123 @@ type WebhookEvent struct {
 	// Session is set for session.* events.
 	Session *SessionEvent
 }
+
+// ContactListItem is one entry in the account's locally-synced contact list.
+type ContactListItem struct {
+	JID          string `json:"jid"`
+	PushName     string `json:"push_name,omitempty"`
+	FullName     string `json:"full_name,omitempty"`
+	FirstName    string `json:"first_name,omitempty"`
+	BusinessName string `json:"business_name,omitempty"`
+}
+
+// ContactListResponse is a page of the account's locally-synced contacts. The
+// list reflects the synced address book, so an empty or partial result is not an
+// error (GET /contact/ never 404s on empty).
+type ContactListResponse struct {
+	// Contacts is this page of synced contacts.
+	Contacts []ContactListItem `json:"contacts"`
+	// Count is the number of items in this page.
+	Count int `json:"count"`
+	// Total is the total number of synced contacts.
+	Total int `json:"total"`
+	// Note is an optional gateway-supplied advisory (e.g. sync status).
+	Note string `json:"note,omitempty"`
+}
+
+// ContactInfoResponse is a server-side profile lookup for one user: status text,
+// current picture id, verified business name, linked-device count, and lid.
+type ContactInfoResponse struct {
+	JID          string `json:"jid"`
+	Status       string `json:"status,omitempty"`
+	PictureID    string `json:"picture_id,omitempty"`
+	VerifiedName string `json:"verified_name,omitempty"`
+	DeviceCount  int    `json:"device_count"`
+	LID          string `json:"lid,omitempty"`
+}
+
+// AvatarResponse is a chat's (user or group) profile picture. URL is a
+// time-limited WhatsApp CDN link the caller downloads directly. ID doubles as
+// the ETag: pass it back to GetAvatar as priorID to get ErrNotModified (304)
+// when the picture is unchanged.
+type AvatarResponse struct {
+	JID        string `json:"jid"`
+	URL        string `json:"url"`
+	ID         string `json:"id"`
+	Type       string `json:"type"` // "image" (full res) or "preview" (thumbnail)
+	DirectPath string `json:"direct_path,omitempty"`
+}
+
+// GroupListItem is one entry in the account's joined-groups list (a lightweight
+// summary with no participant roster).
+type GroupListItem struct {
+	JID              string `json:"jid"` // the group's @g.us JID
+	Name             string `json:"name,omitempty"`
+	Topic            string `json:"topic,omitempty"`
+	OwnerJID         string `json:"owner_jid,omitempty"`
+	ParticipantCount int    `json:"participant_count"`
+	IsAnnounce       bool   `json:"is_announce"`  // only admins can send
+	IsLocked         bool   `json:"is_locked"`    // only admins can edit group info
+	IsCommunity      bool   `json:"is_community"` // this group is a community parent
+}
+
+// GroupListResponse is the account's joined groups. Not paginated; Count always
+// equals len(Groups).
+type GroupListResponse struct {
+	Groups []GroupListItem `json:"groups"`
+	Count  int             `json:"count"`
+}
+
+// GroupParticipantItem is one member in a group's roster.
+type GroupParticipantItem struct {
+	JID          string `json:"jid"`
+	PhoneNumber  string `json:"phone_number,omitempty"`
+	LID          string `json:"lid,omitempty"`
+	IsAdmin      bool   `json:"is_admin"`
+	IsSuperAdmin bool   `json:"is_super_admin"`
+}
+
+// GroupInfoResponse is the full detail of a single group, including its member
+// roster. Requires the account to be a participant (403 otherwise, 404 if absent).
+type GroupInfoResponse struct {
+	JID              string                 `json:"jid"`
+	Name             string                 `json:"name,omitempty"`
+	Topic            string                 `json:"topic,omitempty"`
+	OwnerJID         string                 `json:"owner_jid,omitempty"`
+	ParticipantCount int                    `json:"participant_count"`
+	IsAnnounce       bool                   `json:"is_announce"`
+	IsLocked         bool                   `json:"is_locked"`
+	IsCommunity      bool                   `json:"is_community"`
+	IsEphemeral      bool                   `json:"is_ephemeral"`
+	Participants     []GroupParticipantItem `json:"participants"`
+}
+
+// MarkReadRequest marks one or more messages in a chat as read (blue ticks).
+type MarkReadRequest struct {
+	// Chat is the canonical recipient (see SendMessageTextRequest.Chat).
+	Chat string `json:"chat"`
+	// MessageIDs are the message IDs to mark read.
+	MessageIDs []string `json:"message_ids"`
+	// Sender is the message author's JID/number; required for group chats.
+	Sender string `json:"sender,omitempty"`
+}
+
+// PresenceState is a chat typing-indicator state.
+type PresenceState = string
+
+const (
+	// PresenceComposing shows the "typing…" indicator.
+	PresenceComposing PresenceState = "composing"
+	// PresenceRecording shows the "recording audio…" indicator.
+	PresenceRecording PresenceState = "recording"
+	// PresencePaused clears the typing indicator.
+	PresencePaused PresenceState = "paused"
+)
+
+// ChatPresenceRequest sets the typing indicator in a chat.
+type ChatPresenceRequest struct {
+	// Chat is the canonical recipient (see SendMessageTextRequest.Chat).
+	Chat string `json:"chat"`
+	// State is one of composing | recording | paused.
+	State string `json:"state"`
+}

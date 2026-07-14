@@ -57,6 +57,9 @@ var (
 	ErrConflict = &SDKError{Code: http.StatusConflict, Message: "conflict"}
 	// ErrRateLimited is returned when rate limit is exceeded (429)
 	ErrRateLimited = &SDKError{Code: http.StatusTooManyRequests, Message: "rate limited"}
+	// ErrNotModified is returned by GetAvatar when the caller-supplied prior
+	// avatar id (If-None-Match) still matches — the picture is unchanged (304).
+	ErrNotModified = &SDKError{Code: http.StatusNotModified, Message: "not modified"}
 	// ErrInternalServer is returned for server errors (500)
 	ErrInternalServer = &SDKError{Code: http.StatusInternalServerError, Message: "internal server error"}
 	// ErrInvalidSignature is returned when webhook signature verification fails

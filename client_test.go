@@ -2469,6 +2469,198 @@ func TestSendText_IdempotencyUnprocessable(t *testing.T) {
 	}
 }
 
+func TestListContacts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/contact/" {
+			t.Errorf("expected path /api/v1/contact/, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("limit") != "50" || r.URL.Query().Get("offset") != "10" {
+			t.Errorf("unexpected query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ContactListResponse{
+			Contacts: []ContactListItem{{JID: "628@s.whatsapp.net", PushName: "Bob"}},
+			Count:    1, Total: 42,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.ListContacts(context.Background(), 50, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Count != 1 || resp.Total != 42 || len(resp.Contacts) != 1 || resp.Contacts[0].PushName != "Bob" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetContactInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/contact/info" {
+			t.Errorf("expected path /api/v1/contact/info, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("chat") != "628@s.whatsapp.net" {
+			t.Errorf("expected chat query, got %q", r.URL.Query().Get("chat"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ContactInfoResponse{JID: "628@s.whatsapp.net", Status: "hi", DeviceCount: 2, LID: "77@lid"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.GetContactInfo(context.Background(), "628@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.DeviceCount != 2 || resp.LID != "77@lid" || resp.Status != "hi" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetAvatar_OK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/contact/avatar" {
+			t.Errorf("expected path /api/v1/contact/avatar, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("chat") != "628@s.whatsapp.net" || r.URL.Query().Get("preview") != "true" {
+			t.Errorf("unexpected query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("ETag", `"pic_1"`)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(AvatarResponse{JID: "628@s.whatsapp.net", URL: "https://cdn/x.jpg", ID: "pic_1", Type: "preview"})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.GetAvatar(context.Background(), "628@s.whatsapp.net", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != "pic_1" || resp.Type != "preview" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestGetAvatar_NotModified(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != `"pic_1"` {
+			t.Errorf("expected If-None-Match \"pic_1\", got %q", r.Header.Get("If-None-Match"))
+		}
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	_, err := client.GetAvatar(context.Background(), "628@s.whatsapp.net", false, "pic_1")
+	if !errors.Is(err, ErrNotModified) {
+		t.Errorf("expected ErrNotModified, got %v", err)
+	}
+}
+
+func TestGetAvatar_NotFoundAndForbidden(t *testing.T) {
+	cases := []struct {
+		status int
+		check  func(error) bool
+	}{
+		{http.StatusNotFound, IsNotFound},
+		{http.StatusForbidden, IsForbidden},
+	}
+	for _, tc := range cases {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(tc.status)
+			json.NewEncoder(w).Encode(map[string]interface{}{"error": "x", "code": tc.status})
+		}))
+		client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+		_, err := client.GetAvatar(context.Background(), "628@s.whatsapp.net", false)
+		if !tc.check(err) {
+			t.Errorf("status %d: unexpected error mapping: %v", tc.status, err)
+		}
+		server.Close()
+	}
+}
+
+func TestListGroups(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/" {
+			t.Errorf("expected path /api/v1/group/, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupListResponse{
+			Groups: []GroupListItem{{JID: "12@g.us", Name: "Team", ParticipantCount: 3, IsCommunity: true}},
+			Count:  1,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.ListGroups(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Count != 1 || resp.Groups[0].Name != "Team" || !resp.Groups[0].IsCommunity {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestListGroups_RateLimited(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "budget exhausted", "code": 429})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	_, err := client.ListGroups(context.Background())
+	if !IsRateLimited(err) {
+		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestGetGroupInfo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/info" {
+			t.Errorf("expected path /api/v1/group/info, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("chat") != "12@g.us" {
+			t.Errorf("expected chat=12@g.us, got %q", r.URL.Query().Get("chat"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupInfoResponse{
+			JID: "12@g.us", Name: "Team", ParticipantCount: 2,
+			Participants: []GroupParticipantItem{
+				{JID: "628@s.whatsapp.net", PhoneNumber: "628", IsAdmin: true},
+				{JID: "629@s.whatsapp.net"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.GetGroupInfo(context.Background(), "12@g.us")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Participants) != 2 || !resp.Participants[0].IsAdmin {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestReadMethods_RequireAuth(t *testing.T) {
+	client := NewClient()
+	if _, err := client.ListContacts(context.Background(), 10, 0); err != ErrNotAuthenticated {
+		t.Errorf("ListContacts: expected ErrNotAuthenticated, got %v", err)
+	}
+	if _, err := client.GetAvatar(context.Background(), "628", false); err != ErrNotAuthenticated {
+		t.Errorf("GetAvatar: expected ErrNotAuthenticated, got %v", err)
+	}
+	if _, err := client.ListGroups(context.Background()); err != ErrNotAuthenticated {
+		t.Errorf("ListGroups: expected ErrNotAuthenticated, got %v", err)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

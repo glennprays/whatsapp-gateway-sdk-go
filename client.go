@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -803,6 +804,117 @@ func (c *Client) CheckContact(ctx context.Context, msisdn string) (*ContactCheck
 
 	var resp ContactCheckResponse
 	path := "/contact/check?msisdn=" + url.QueryEscape(msisdn)
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListContacts returns a page of the account's locally-synced contacts. limit
+// (gateway default 100, max 500) and offset paginate the result. An empty
+// address book is not an error — this endpoint never 404s on empty.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListContacts(ctx context.Context, limit, offset int) (*ContactListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/contact/?limit=%d&offset=%d", limit, offset)
+	var resp ContactListResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetContactInfo returns a server-side profile lookup for one user: status text,
+// current picture id, verified business name, linked-device count, and lid.
+//
+// chat is the canonical recipient (a bare number, "@s.whatsapp.net", or "@lid").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetContactInfo(ctx context.Context, chat string) (*ContactInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/contact/info?chat=" + url.QueryEscape(chat)
+	var resp ContactInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetAvatar returns a chat's profile picture (user or group). preview requests
+// the low-res thumbnail instead of the full-resolution image.
+//
+// The returned AvatarResponse.ID doubles as an ETag. Pass it back on a later
+// call as the optional priorID to enable conditional fetching: if the picture is
+// unchanged the gateway replies 304 and this method returns ErrNotModified
+// (check with errors.Is(err, waga.ErrNotModified)). A chat with no picture
+// returns ErrNotFound (404); a hidden picture returns ErrForbidden (403).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetAvatar(ctx context.Context, chat string, preview bool, priorID ...string) (*AvatarResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/contact/avatar?chat=" + url.QueryEscape(chat)
+	if preview {
+		path += "&preview=true"
+	}
+
+	var headers []reqHeader
+	if len(priorID) > 0 && priorID[0] != "" {
+		headers = append(headers, reqHeader{"If-None-Match", `"` + priorID[0] + `"`})
+	}
+
+	var resp AvatarResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true, headers...); err != nil {
+		var se *SDKError
+		if errors.As(err, &se) && se.Code == http.StatusNotModified {
+			return nil, ErrNotModified
+		}
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListGroups returns the account's joined groups as lightweight summaries (no
+// participant roster; use GetGroupInfo for one group's full detail).
+//
+// This is a server-hitting read subject to a per-account budget; when the budget
+// is exhausted the gateway returns 429 (ErrRateLimited).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListGroups(ctx context.Context) (*GroupListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp GroupListResponse
+	if err := c.doRequest(ctx, http.MethodGet, "/group/", nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInfo returns a single group's full detail plus its participant roster.
+//
+// chat must be a group JID ("@g.us"). The account must be a member: a non-member
+// group returns ErrForbidden (403), an absent group returns ErrNotFound (404).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInfo(ctx context.Context, chat string) (*GroupInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/info?chat=" + url.QueryEscape(chat)
+	var resp GroupInfoResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
 	}
