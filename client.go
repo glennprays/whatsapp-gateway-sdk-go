@@ -960,6 +960,123 @@ func (c *Client) SendChatPresence(ctx context.Context, chat, state string) error
 	return c.doRequest(ctx, http.MethodPost, "/chat/presence", reqBody, &resp, true)
 }
 
+// CreateGroup creates a group, or a community when req.IsCommunity is set. The
+// response carries the new group's info plus a per-participant Results slice
+// (invited/failed members are reported there, not as an error).
+//
+// Group/community management is gated server-side by GROUP_MANAGEMENT_ENABLED;
+// when disabled the whole mutation surface is unregistered (404).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) CreateGroup(ctx context.Context, req CreateGroupRequest) (*CreateGroupResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp CreateGroupResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/", req, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// LeaveGroup leaves a group. chat must be a group JID ("@g.us"). Allowed for
+// non-admins.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) LeaveGroup(ctx context.Context, chat string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+	}{chat}
+	return c.doRequest(ctx, http.MethodPost, "/group/leave", body, nil, true)
+}
+
+// UpdateGroupParticipants mutates a group's roster. action is one of "add",
+// "remove", "promote", or "demote". chat must be a group JID ("@g.us").
+//
+// Partial success is a 200: inspect the returned Results for each participant's
+// status ("ok", "invited" when a privacy-blocked add became an invite, or
+// "failed" with a Code). "add" is gated server-side by
+// GROUP_ADD_PARTICIPANTS_ENABLED (403 when disabled).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) UpdateGroupParticipants(ctx context.Context, chat, action string, participants []string) (*GroupParticipantsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat         string   `json:"chat"`
+		Action       string   `json:"action"`
+		Participants []string `json:"participants"`
+	}{chat, action, participants}
+
+	var resp GroupParticipantsResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/participants", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetGroupSettings toggles group-level settings. Pass a non-nil announce (only
+// admins can send) and/or locked (only admins can edit group info); at least one
+// must be supplied. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupSettings(ctx context.Context, chat string, announce, locked *bool) (*GroupSettingsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat     string `json:"chat"`
+		Announce *bool  `json:"announce,omitempty"`
+		Locked   *bool  `json:"locked,omitempty"`
+	}{chat, announce, locked}
+
+	var resp GroupSettingsResponse
+	if err := c.doRequest(ctx, http.MethodPatch, "/group/settings", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetGroupName sets a group's name (subject), max 25 characters. chat must be a
+// group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupName(ctx context.Context, chat, name string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+		Name string `json:"name"`
+	}{chat, name}
+	return c.doRequest(ctx, http.MethodPatch, "/group/name", body, nil, true)
+}
+
+// SetGroupTopic sets a group's topic (description), max 512 characters; an empty
+// topic clears it. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupTopic(ctx context.Context, chat, topic string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat  string `json:"chat"`
+		Topic string `json:"topic"`
+	}{chat, topic}
+	return c.doRequest(ctx, http.MethodPatch, "/group/topic", body, nil, true)
+}
+
 // GetIncomingMessages fetches the most recent incoming messages buffered by the
 // gateway for the authenticated session, newest first.
 //

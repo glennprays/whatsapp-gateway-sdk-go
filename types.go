@@ -1,5 +1,7 @@
 package waga
 
+import "time"
+
 // RegisterRequest represents a registration request for a new phone number.
 // It contains the phone number and secret key required to authenticate
 // with the WhatsApp Gateway service and obtain a JWT token.
@@ -575,4 +577,129 @@ type ChatPresenceRequest struct {
 	Chat string `json:"chat"`
 	// State is one of composing | recording | paused.
 	State string `json:"state"`
+}
+
+// ---- Group & community management ----
+//
+// Every group/community op requires an explicit group JID ("@g.us"); a bare
+// number or user JID is a 400. Batch ops (participant add/remove/promote/demote,
+// join-request approve/reject) return 200 with a per-participant Results slice —
+// a single bad member is reported there, not as an overall error.
+
+// CreateGroupRequest creates a group, or a community when IsCommunity is true.
+// An empty Participants list creates a group of just the account; adding
+// participants at creation is gated server-side by GROUP_ADD_PARTICIPANTS_ENABLED.
+type CreateGroupRequest struct {
+	Name                   string   `json:"name"`
+	Participants           []string `json:"participants,omitempty"`
+	IsCommunity            bool     `json:"is_community,omitempty"`
+	LinkedParentJID        string   `json:"linked_parent_jid,omitempty"`
+	IsAnnounce             bool     `json:"is_announce,omitempty"`
+	IsLocked               bool     `json:"is_locked,omitempty"`
+	IsJoinApprovalRequired bool     `json:"is_join_approval_required,omitempty"`
+}
+
+// ParticipantInvite is present on a ParticipantResult when an add was converted
+// to an invite because the target's privacy blocks a direct add.
+type ParticipantInvite struct {
+	Code      string    `json:"code"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+// ParticipantResult is the per-participant outcome shared by every batch
+// mutation. Status is one of "ok", "invited" (add converted to an invite), or
+// "failed"; Code carries the underlying error code when failed.
+type ParticipantResult struct {
+	JID    string             `json:"jid"`
+	LID    string             `json:"lid,omitempty"`
+	Status string             `json:"status"`
+	Code   int                `json:"code,omitempty"`
+	Invite *ParticipantInvite `json:"invite,omitempty"`
+}
+
+// CreateGroupResponse echoes the new group's JID, full info, and per-participant
+// add results.
+type CreateGroupResponse struct {
+	GroupJID  string              `json:"group_jid"`
+	GroupInfo *GroupInfoResponse  `json:"group_info"`
+	Results   []ParticipantResult `json:"results"`
+}
+
+// GroupParticipantsResponse is the per-participant outcome of a roster mutation
+// (partial success is a 200, never an overall error).
+type GroupParticipantsResponse struct {
+	GroupJID string              `json:"group_jid"`
+	Action   string              `json:"action"`
+	Results  []ParticipantResult `json:"results"`
+}
+
+// GroupSettingsResponse reports which settings were applied (e.g. ["announce"]).
+type GroupSettingsResponse struct {
+	GroupJID string   `json:"group_jid"`
+	Applied  []string `json:"applied"`
+}
+
+// GroupPhotoResponse reports the new picture id (on set) or removal.
+type GroupPhotoResponse struct {
+	PictureID string `json:"picture_id,omitempty"`
+	Removed   bool   `json:"removed,omitempty"`
+}
+
+// GroupInviteLinkResponse is a group's invite link.
+type GroupInviteLinkResponse struct {
+	Chat       string `json:"chat"`        // resolved @g.us JID
+	InviteLink string `json:"invite_link"` // https://chat.whatsapp.com/<code>
+}
+
+// JoinGroupResponse is the JID whatsmeow returned for a join-by-link (the group,
+// or a pending membership-approval request — whatsmeow does not distinguish).
+type JoinGroupResponse struct {
+	GroupJID string `json:"group_jid"`
+}
+
+// GroupJoinRequestItem is one pending join request.
+type GroupJoinRequestItem struct {
+	JID         string `json:"jid"`
+	RequestedAt string `json:"requested_at,omitempty"` // RFC3339
+}
+
+// GroupJoinRequestsResponse lists a group's pending join requests.
+type GroupJoinRequestsResponse struct {
+	Chat     string                 `json:"chat"`
+	Requests []GroupJoinRequestItem `json:"requests"`
+	Count    int                    `json:"count"`
+}
+
+// GroupJoinRequestsActionResponse is the per-participant outcome of an
+// approve/reject (partial success is a 200).
+type GroupJoinRequestsActionResponse struct {
+	Chat    string              `json:"chat"`
+	Action  string              `json:"action"`
+	Results []ParticipantResult `json:"results"`
+}
+
+// SubGroupItem is one linked group under a community. The default sub-group is
+// the community's announcement group.
+type SubGroupItem struct {
+	JID               string `json:"jid"`
+	Name              string `json:"name,omitempty"`
+	IsDefaultSubGroup bool   `json:"is_default_sub_group"`
+}
+
+// SubGroupListResponse is a community's linked sub-groups (Count == len(SubGroups)).
+type SubGroupListResponse struct {
+	SubGroups []SubGroupItem `json:"sub_groups"`
+	Count     int            `json:"count"`
+}
+
+// CommunityParticipantItem is one member across a community's linked groups.
+type CommunityParticipantItem struct {
+	JID string `json:"jid"`
+}
+
+// CommunityParticipantsResponse is every participant across a community's linked
+// groups (Count == len(Participants)).
+type CommunityParticipantsResponse struct {
+	Participants []CommunityParticipantItem `json:"participants"`
+	Count        int                        `json:"count"`
 }

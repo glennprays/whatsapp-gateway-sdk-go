@@ -2735,6 +2735,154 @@ func TestTwoWayPrimitives_RequireAuth(t *testing.T) {
 	}
 }
 
+func TestCreateGroup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/" || r.Method != http.MethodPost {
+			t.Errorf("expected POST /api/v1/group/, got %s %s", r.Method, r.URL.Path)
+		}
+		var body CreateGroupRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body.Name != "Team" || !body.IsCommunity || len(body.Participants) != 1 {
+			t.Errorf("unexpected body: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(CreateGroupResponse{
+			GroupJID: "12@g.us",
+			Results:  []ParticipantResult{{JID: "628@s.whatsapp.net", Status: "invited", Invite: &ParticipantInvite{Code: "abc"}}},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.CreateGroup(context.Background(), CreateGroupRequest{
+		Name: "Team", Participants: []string{"628"}, IsCommunity: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GroupJID != "12@g.us" || resp.Results[0].Status != "invited" || resp.Results[0].Invite.Code != "abc" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestLeaveGroup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/leave" || r.Method != http.MethodPost {
+			t.Errorf("expected POST /api/v1/group/leave, got %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["chat"] != "12@g.us" {
+			t.Errorf("expected chat 12@g.us, got %q", body["chat"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"left": true})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	if err := client.LeaveGroup(context.Background(), "12@g.us"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdateGroupParticipants(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/group/participants" {
+			t.Errorf("expected /api/v1/group/participants, got %s", r.URL.Path)
+		}
+		var body struct {
+			Chat         string   `json:"chat"`
+			Action       string   `json:"action"`
+			Participants []string `json:"participants"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Chat != "12@g.us" || body.Action != "promote" || len(body.Participants) != 2 {
+			t.Errorf("unexpected body: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupParticipantsResponse{
+			GroupJID: "12@g.us", Action: "promote",
+			Results: []ParticipantResult{
+				{JID: "628@s.whatsapp.net", Status: "ok"},
+				{JID: "629@s.whatsapp.net", Status: "failed", Code: 404},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	resp, err := client.UpdateGroupParticipants(context.Background(), "12@g.us", "promote", []string{"628", "629"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Results) != 2 || resp.Results[1].Status != "failed" || resp.Results[1].Code != 404 {
+		t.Errorf("unexpected results: %+v", resp.Results)
+	}
+}
+
+func TestSetGroupSettings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/group/settings" {
+			t.Errorf("expected PATCH /api/v1/group/settings, got %s %s", r.Method, r.URL.Path)
+		}
+		var raw map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&raw)
+		if raw["announce"] != true {
+			t.Errorf("expected announce true, got %v", raw["announce"])
+		}
+		if _, ok := raw["locked"]; ok {
+			t.Errorf("expected locked to be omitted, got %v", raw["locked"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(GroupSettingsResponse{GroupJID: "12@g.us", Applied: []string{"announce"}})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	announce := true
+	resp, err := client.SetGroupSettings(context.Background(), "12@g.us", &announce, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Applied) != 1 || resp.Applied[0] != "announce" {
+		t.Errorf("unexpected applied: %v", resp.Applied)
+	}
+}
+
+func TestSetGroupNameAndTopic(t *testing.T) {
+	var gotPath, gotName, gotTopic string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		gotName, gotTopic = body["name"], body["topic"]
+		if r.Method != http.MethodPatch {
+			t.Errorf("expected PATCH, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"updated": true})
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL+"/api/v1"), WithToken("test-token"))
+	if err := client.SetGroupName(context.Background(), "12@g.us", "New Name"); err != nil {
+		t.Fatalf("SetGroupName: %v", err)
+	}
+	if gotPath != "/api/v1/group/name" || gotName != "New Name" {
+		t.Errorf("SetGroupName sent %s name=%q", gotPath, gotName)
+	}
+	if err := client.SetGroupTopic(context.Background(), "12@g.us", ""); err != nil {
+		t.Fatalf("SetGroupTopic: %v", err)
+	}
+	if gotPath != "/api/v1/group/topic" || gotTopic != "" {
+		t.Errorf("SetGroupTopic sent %s topic=%q", gotPath, gotTopic)
+	}
+}
+
 func TestSendText_QueueMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

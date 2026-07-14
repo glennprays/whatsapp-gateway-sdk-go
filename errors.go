@@ -55,6 +55,9 @@ var (
 	ErrNotFound = &SDKError{Code: http.StatusNotFound, Message: "not found"}
 	// ErrConflict is returned for conflicting requests (409)
 	ErrConflict = &SDKError{Code: http.StatusConflict, Message: "conflict"}
+	// ErrGone is returned when a resource is no longer available (410), e.g.
+	// GetGroupInviteInfo on a revoked invite link.
+	ErrGone = &SDKError{Code: http.StatusGone, Message: "gone"}
 	// ErrRateLimited is returned when rate limit is exceeded (429)
 	ErrRateLimited = &SDKError{Code: http.StatusTooManyRequests, Message: "rate limited"}
 	// ErrNotModified is returned by GetAvatar when the caller-supplied prior
@@ -134,6 +137,12 @@ func IsForbidden(err error) bool {
 // Returns true if err matches ErrConflict.
 func IsConflict(err error) bool {
 	return errors.Is(err, ErrConflict)
+}
+
+// IsGone checks if the error is a gone error (HTTP 410).
+// Returns true if err matches ErrGone.
+func IsGone(err error) bool {
+	return errors.Is(err, ErrGone)
 }
 
 // IsInternalServer checks if the error is an internal server error (HTTP 500).
