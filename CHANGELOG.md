@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Chat addressing, replies, and mentions on all sends.** Every `SendXxx`
+  method now accepts a trailing variadic of `SendOption`s (additive; existing
+  calls are unchanged):
+  - `WithChat(chat)` sets the canonical recipient — a bare number, a user JID,
+    a group JID (`@g.us`), or a `@lid` — taking precedence over the positional
+    `msisdn` alias. Send request structs gained `Chat`, and `SendMessageResponse`
+    now echoes the resolved recipient in `Chat`.
+  - `WithReply(id, sender, quotedText)` quotes an existing message.
+  - `WithMentions(numbers...)` @-tags participants (sent as repeated multipart
+    fields for media sends).
+- **`WithIdempotencyKey(key)`** attaches an `Idempotency-Key` header to a send
+  (JSON and multipart). Reusing a key replays the original response; an in-flight
+  duplicate is `409` (`ErrConflict`) and a key reused with a different body is
+  `422`. The header is only sent when a key is provided.
+- **`ParseWebhook(payload, signature)`** on `WebhookVerifier`: a unified,
+  signature-verifying dispatcher returning a discriminated `WebhookEvent`
+  (`Incoming` / `Outgoing` / `Session`). The existing `ParseIncomingWebhook` /
+  `ParseOutgoingWebhook` are unchanged.
+- **Session lifecycle webhooks.** New `SessionEvent` type and the six
+  `session.*` event constants (`logged_out`, `banned`, `connect_failure`,
+  `connected`, `disconnected`, `replaced`), plus a unified `WebhookEventType`
+  catalog covering the four message events too.
+- New `ErrUnknownWebhookEvent` sentinel returned by `ParseWebhook` for
+  unrecognized events.
+
 ## [0.6.0] - 2026-07-05
 
 ### Added

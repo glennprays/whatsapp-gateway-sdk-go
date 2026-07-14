@@ -152,6 +152,44 @@ if err != nil {
 
 ## Sending Messages
 
+### Send Options
+
+Every `SendXxx` method takes a trailing variadic of `SendOption`s for canonical
+chat addressing, quoted replies, @-mentions, and send idempotency. Existing call
+sites keep working unchanged — options are purely additive.
+
+```go
+resp, err := client.SendText(ctx, recipient, "Hi team!",
+    waga.WithChat("120363000000000000@g.us"),        // canonical recipient (see below)
+    waga.WithReply("MSG_ID", senderJID, "quoted text"), // quote an existing message
+    waga.WithMentions("6281111111111", "6282222222222"), // @-tag participants
+    waga.WithIdempotencyKey("order-4711-notify"),       // safe retry (see Idempotency)
+)
+```
+
+The same options work on the media sends (`SendImage`/`SendAudio`/`SendVideo`/
+`SendDocument`/`SendSticker`) and `SendLocation`/`SendPoll`.
+
+#### Chat Addressing
+
+`WithChat` sets the **canonical** recipient — a bare number, a user JID
+(`@s.whatsapp.net`), a group JID (`@g.us`), or a `@lid`. It takes precedence over
+the positional recipient argument, which the gateway treats as the deprecated
+`msisdn` alias. Send responses echo the resolved recipient in `resp.Chat`:
+
+```go
+resp, _ := client.SendText(ctx, "", "Hi!", waga.WithChat("120363000000000000@g.us"))
+fmt.Println("delivered to:", resp.Chat)
+```
+
+#### Idempotency
+
+`WithIdempotencyKey` sends an `Idempotency-Key` header. Reusing the same key
+replays the gateway's original response (HTTP 200); an in-flight duplicate
+returns `409` (`waga.ErrConflict`) and the same key with a **different** request
+body returns `422` (`SDKError.Code == 422`). The header is only sent when a key
+is provided.
+
 ### Text Message
 
 ```go
@@ -440,6 +478,52 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### Unified Dispatch with ParseWebhook
+
+When a single endpoint receives every webhook type, `ParseWebhook` verifies the
+signature and dispatches on the `event` field into a discriminated
+`WebhookEvent`. Exactly one of `Incoming`, `Outgoing`, or `Session` is non-nil.
+The narrower `ParseIncomingWebhook` / `ParseOutgoingWebhook` remain available.
+
+```go
+ev, err := verifier.ParseWebhook(body, signature)
+if err != nil {
+    if errors.Is(err, waga.ErrUnknownWebhookEvent) {
+        http.Error(w, "unknown event", http.StatusBadRequest)
+        return
+    }
+    // errors.Is(err, waga.ErrInvalidSignature) for a bad signature
+    http.Error(w, "invalid webhook", http.StatusBadRequest)
+    return
+}
+
+switch ev.Event {
+case waga.WebhookEventMessageIncoming:
+    fmt.Printf("from %s: %s\n", ev.Incoming.From, ev.Incoming.Text)
+case waga.WebhookEventMessageSent, waga.WebhookEventMessageQueued, waga.WebhookEventMessageFailed:
+    fmt.Printf("%s: %s\n", ev.Outgoing.Event, ev.Outgoing.MessageId)
+case waga.WebhookEventSessionBanned:
+    fmt.Printf("account %s banned for %ds\n", ev.Session.PhoneNumber, ev.Session.ExpiresIn)
+default: // other session.* lifecycle events
+    fmt.Printf("session event %s for %s\n", ev.Event, ev.Session.JID)
+}
+```
+
+#### Session Events
+
+Besides the four message events, the gateway emits six `session.*` lifecycle
+events, decoded into `SessionEvent` (flat envelope `Event`/`PhoneNumber`/`JID`/
+`Timestamp` plus event-specific extras):
+
+| Event | Extras |
+|-------|--------|
+| `WebhookEventSessionLoggedOut` | `OnConnect`, `Reason`, `ReasonText` |
+| `WebhookEventSessionBanned` | `Code`, `ReasonText`, `ExpiresIn` |
+| `WebhookEventSessionConnectFailure` | `Reason`, `ReasonText`, `Message` |
+| `WebhookEventSessionConnected` | envelope only |
+| `WebhookEventSessionDisconnected` | envelope only |
+| `WebhookEventSessionReplaced` | envelope only |
+
 ### Webhook Payload Types
 
 #### Incoming Message
@@ -510,6 +594,7 @@ if err != nil {
 | `ErrRateLimited` | 429 | Too many requests |
 | `ErrInternalServer` | 500 | Server error |
 | `ErrInvalidSignature` | - | Webhook signature verification failed |
+| `ErrUnknownWebhookEvent` | - | `ParseWebhook` got an unrecognized event |
 | `ErrNotAuthenticated` | - | Client has no token set |
 
 ## Helper Functions
