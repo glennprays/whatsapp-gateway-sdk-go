@@ -266,6 +266,11 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	// Build multipart form
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
@@ -430,6 +435,11 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	// Build multipart form
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
@@ -507,6 +517,11 @@ func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, 
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
@@ -583,6 +598,11 @@ func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, 
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
@@ -663,6 +683,11 @@ func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Re
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)

@@ -1,5 +1,10 @@
 package waga
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 // SendOption configures a single send call — canonical chat addressing, a
 // reply-to quote, @-mentions, and (see WithIdempotencyKey) send idempotency.
 // Options are applied left-to-right and are accepted by every SendXxx method as
@@ -44,6 +49,11 @@ func WithMentions(mentions ...string) SendOption {
 // same key replays the gateway's original response (200 with Idempotent-Replay:
 // true); an in-flight duplicate returns 409 (ErrConflict) and the same key with
 // a different request body returns 422.
+//
+// For the multipart media sends (image/audio/video/document/sticker) the retry
+// must supply identical file content (and the same fields): the gateway keys
+// idempotency on a hash of the raw request body, so a retry that streams
+// different bytes is a different body (422), not a replay.
 func WithIdempotencyKey(key string) SendOption {
 	return func(c *sendConfig) { c.idempotencyKey = key }
 }
@@ -58,6 +68,21 @@ func (c sendConfig) headers() []reqHeader {
 		return nil
 	}
 	return []reqHeader{{"Idempotency-Key", c.idempotencyKey}}
+}
+
+// multipartBoundary returns a deterministic multipart boundary derived from the
+// idempotency key (and whether one is set). Go's multipart.Writer otherwise picks
+// a random boundary per call, so a retried media send produces a different raw
+// body and the gateway — which hashes the raw request body for idempotency —
+// treats the retry as a different body (422) instead of replaying the original
+// response. A fixed, key-derived boundary makes retries byte-identical (given the
+// same field values and file content) so replay works. Only used when a key is set.
+func (c sendConfig) multipartBoundary() (string, bool) {
+	if c.idempotencyKey == "" {
+		return "", false
+	}
+	sum := sha256.Sum256([]byte("waga-idem:" + c.idempotencyKey))
+	return "waga" + hex.EncodeToString(sum[:]), true // 4+64=68 chars, a valid RFC 2046 boundary
 }
 
 // newSendConfig folds the given options into a sendConfig.
