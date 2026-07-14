@@ -755,3 +755,48 @@ func TestParseWebhook_InvalidSignature(t *testing.T) {
 		t.Errorf("expected ErrInvalidSignature, got %v", err)
 	}
 }
+
+// TestParseWebhook_DecodesNewFields locks the two fields the SDK previously
+// dropped on the wire: the failure reason on message.failed (OutgoingWebhookPayload.Error)
+// and the chat addressing mode on message.incoming (IncomingWebhookPayload.AddressingMode).
+func TestParseWebhook_DecodesNewFields(t *testing.T) {
+	secret := "s3cr3t"
+	verifier := NewWebhookVerifier(secret)
+
+	failed := []byte(`{
+		"event": "message.failed",
+		"job_id": "j1",
+		"to": "628999@s.whatsapp.net",
+		"phone_number": "628111",
+		"timestamp": 1625247600,
+		"message_id": "m1",
+		"error": "recipient is not on WhatsApp"
+	}`)
+	ev, err := verifier.ParseWebhook(failed, ComputeSignature(failed, secret))
+	if err != nil {
+		t.Fatalf("parse failed webhook: %v", err)
+	}
+	if ev.Outgoing == nil || ev.Outgoing.Error != "recipient is not on WhatsApp" {
+		t.Fatalf("message.failed error reason dropped: %+v", ev.Outgoing)
+	}
+
+	incoming := []byte(`{
+		"event": "message.incoming",
+		"chat": "628222@lid",
+		"from": "628222@lid",
+		"is_group": false,
+		"addressing_mode": "lid",
+		"message_id": "m2",
+		"push_name": "A",
+		"timestamp": 1625247600,
+		"type": "text",
+		"text": "hi"
+	}`)
+	ev, err = verifier.ParseWebhook(incoming, ComputeSignature(incoming, secret))
+	if err != nil {
+		t.Fatalf("parse incoming webhook: %v", err)
+	}
+	if ev.Incoming == nil || ev.Incoming.AddressingMode != "lid" {
+		t.Fatalf("message.incoming addressing_mode dropped: %+v", ev.Incoming)
+	}
+}

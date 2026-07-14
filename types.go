@@ -208,6 +208,9 @@ type OutgoingWebhookPayload struct {
 	Timestamp int64 `json:"timestamp"`
 	// MessageId is the unique identifier for the message
 	MessageId string `json:"message_id"`
+	// Error is the failure reason carried by message.failed (and populated on
+	// message.sent/queued when a reason exists); empty on success.
+	Error string `json:"error,omitempty"`
 	// Metadata contains additional optional information about the message
 	Metadata *map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -288,6 +291,8 @@ type IncomingWebhookPayload struct {
 	From string `json:"from"`
 	// IsGroup indicates whether the message was received in a group chat
 	IsGroup bool `json:"is_group"`
+	// AddressingMode is the JID addressing mode of the chat ("pn" or "lid").
+	AddressingMode string `json:"addressing_mode,omitempty"`
 	// MessageId is the unique identifier for the message
 	MessageId string `json:"message_id"`
 	// PushName is the display name of the sender
@@ -327,6 +332,8 @@ type IncomingMessage struct {
 	From string `json:"from"`
 	// IsGroup indicates whether the message was received in a group chat
 	IsGroup bool `json:"is_group"`
+	// AddressingMode is the JID addressing mode of the chat ("pn" or "lid").
+	AddressingMode string `json:"addressing_mode,omitempty"`
 	// PushName is the display name of the sender
 	PushName string `json:"push_name"`
 	// Timestamp is the Unix timestamp when the message was received
