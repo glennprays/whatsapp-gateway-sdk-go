@@ -89,6 +89,10 @@ func WithUserAgent(ua string) Option {
 const (
 	// DefaultBaseURL is the default API endpoint
 	DefaultBaseURL = "http://localhost:3000/api/v1"
+	// DefaultAdminBaseURL is the default base URL for the admin plane. The admin
+	// and health-probe routes live at the server ROOT, not under the /api/v1
+	// base path, so AdminClient defaults to the bare origin.
+	DefaultAdminBaseURL = "http://localhost:3000"
 	// DefaultTimeout is the default HTTP request timeout
 	DefaultTimeout = 30 * time.Second
 	// DefaultUserAgent is the default User-Agent header

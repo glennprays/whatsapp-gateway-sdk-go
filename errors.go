@@ -55,12 +55,21 @@ var (
 	ErrNotFound = &SDKError{Code: http.StatusNotFound, Message: "not found"}
 	// ErrConflict is returned for conflicting requests (409)
 	ErrConflict = &SDKError{Code: http.StatusConflict, Message: "conflict"}
+	// ErrGone is returned when a resource is no longer available (410), e.g.
+	// GetGroupInviteInfo on a revoked invite link.
+	ErrGone = &SDKError{Code: http.StatusGone, Message: "gone"}
 	// ErrRateLimited is returned when rate limit is exceeded (429)
 	ErrRateLimited = &SDKError{Code: http.StatusTooManyRequests, Message: "rate limited"}
+	// ErrNotModified is returned by GetAvatar when the caller-supplied prior
+	// avatar id (If-None-Match) still matches — the picture is unchanged (304).
+	ErrNotModified = &SDKError{Code: http.StatusNotModified, Message: "not modified"}
 	// ErrInternalServer is returned for server errors (500)
 	ErrInternalServer = &SDKError{Code: http.StatusInternalServerError, Message: "internal server error"}
 	// ErrInvalidSignature is returned when webhook signature verification fails
 	ErrInvalidSignature = errors.New("invalid webhook signature")
+	// ErrUnknownWebhookEvent is returned by ParseWebhook when the payload's
+	// event field is not a recognized webhook event type.
+	ErrUnknownWebhookEvent = errors.New("unknown webhook event")
 	// ErrNotAuthenticated is returned when trying to use an authenticated method without setting a token
 	ErrNotAuthenticated = errors.New("client not authenticated, call Register() or SetToken() first")
 )
@@ -75,6 +84,23 @@ func parseError(body []byte, statusCode int, traceID string) error {
 		apiErr = SDKError{
 			Code:    statusCode,
 			Message: string(body),
+		}
+	}
+	// Tolerate gateway builds that serialize the error as the Go field names
+	// {"Status","Message"} instead of the documented {"code","error"} shape, so
+	// the human-readable message is not silently dropped against an older gateway.
+	if apiErr.Message == "" || apiErr.Code == 0 {
+		var alt struct {
+			Status  int    `json:"status"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &alt) == nil {
+			if apiErr.Message == "" {
+				apiErr.Message = alt.Message
+			}
+			if apiErr.Code == 0 {
+				apiErr.Code = alt.Status
+			}
 		}
 	}
 	if apiErr.Code == 0 {
@@ -128,6 +154,12 @@ func IsForbidden(err error) bool {
 // Returns true if err matches ErrConflict.
 func IsConflict(err error) bool {
 	return errors.Is(err, ErrConflict)
+}
+
+// IsGone checks if the error is a gone error (HTTP 410).
+// Returns true if err matches ErrGone.
+func IsGone(err error) bool {
+	return errors.Is(err, ErrGone)
 }
 
 // IsInternalServer checks if the error is an internal server error (HTTP 500).

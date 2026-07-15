@@ -375,3 +375,23 @@ func TestClient_ErrorCarriesResponseTraceID(t *testing.T) {
 		t.Errorf("expected trace ID from response header, got %q", sdkErr.TraceID)
 	}
 }
+
+// TestParseError_TolerantOfGoFieldNames proves the SDK still surfaces the error
+// message when a gateway serializes {"Status","Message"} (Go field names) rather
+// than the documented {"code","error"} shape.
+func TestParseError_TolerantOfGoFieldNames(t *testing.T) {
+	err := parseError([]byte(`{"Status":403,"Message":"not a participant"}`), 403, "tid-1")
+	var se *SDKError
+	if !errors.As(err, &se) {
+		t.Fatalf("want *SDKError, got %T", err)
+	}
+	if se.Code != 403 || se.Message != "not a participant" {
+		t.Fatalf("tolerant decode failed: code=%d message=%q", se.Code, se.Message)
+	}
+	// The documented {"error","code"} shape still works.
+	err = parseError([]byte(`{"code":404,"error":"group not found"}`), 404, "")
+	errors.As(err, &se)
+	if se.Code != 404 || se.Message != "group not found" {
+		t.Fatalf("documented decode regressed: code=%d message=%q", se.Code, se.Message)
+	}
+}

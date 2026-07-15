@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Chat addressing, replies, and mentions on all sends.** Every `SendXxx`
+  method now accepts a trailing variadic of `SendOption`s (additive; existing
+  calls are unchanged):
+  - `WithChat(chat)` sets the canonical recipient — a bare number, a user JID,
+    a group JID (`@g.us`), or a `@lid` — taking precedence over the positional
+    `msisdn` alias. Send request structs gained `Chat`, and `SendMessageResponse`
+    now echoes the resolved recipient in `Chat`.
+  - `WithReply(id, sender, quotedText)` quotes an existing message.
+  - `WithMentions(numbers...)` @-tags participants (sent as repeated multipart
+    fields for media sends).
+- **`WithIdempotencyKey(key)`** attaches an `Idempotency-Key` header to a send
+  (JSON and multipart). Reusing a key replays the original response; an in-flight
+  duplicate is `409` (`ErrConflict`) and a key reused with a different body is
+  `422`. The header is only sent when a key is provided.
+- **`ParseWebhook(payload, signature)`** on `WebhookVerifier`: a unified,
+  signature-verifying dispatcher returning a discriminated `WebhookEvent`
+  (`Incoming` / `Outgoing` / `Session`). The existing `ParseIncomingWebhook` /
+  `ParseOutgoingWebhook` are unchanged.
+- **Session lifecycle webhooks.** New `SessionEvent` type and the six
+  `session.*` event constants (`logged_out`, `banned`, `connect_failure`,
+  `connected`, `disconnected`, `replaced`), plus a unified `WebhookEventType`
+  catalog covering the four message events too.
+- New `ErrUnknownWebhookEvent` sentinel returned by `ParseWebhook` for
+  unrecognized events.
+- **Contact and group read methods** with matching response types:
+  - `ListContacts(ctx, limit, offset)` → `GET /contact/` (paginated locally-synced
+    contacts; `count`/`total`; never 404s on empty).
+  - `GetContactInfo(ctx, chat)` → `GET /contact/info` (status, picture id,
+    verified name, device count, lid).
+  - `GetAvatar(ctx, chat, preview, priorID...)` → `GET /contact/avatar` for a user
+    or group. Pass the previous `AvatarResponse.ID` as the optional `priorID` for
+    conditional (`If-None-Match`) fetches: an unchanged picture returns the new
+    `ErrNotModified` sentinel (304); no picture → `ErrNotFound` (404); hidden →
+    `ErrForbidden` (403).
+  - `ListGroups(ctx)` → `GET /group/` (joined-group summaries; may return
+    `ErrRateLimited` (429) when the per-account read budget is exhausted).
+  - `GetGroupInfo(ctx, chat)` → `GET /group/info` (full detail + participant
+    roster; `ErrForbidden` if not a member, `ErrNotFound` if absent).
+- **Two-way primitives:**
+  - `MarkRead(ctx, chat, messageIDs, sender)` → `POST /message/read` (blue ticks;
+    `sender` required for group chats).
+  - `SendChatPresence(ctx, chat, state)` → `POST /chat/presence` with the
+    `PresenceComposing` / `PresenceRecording` / `PresencePaused` states.
+- New `ErrNotModified` sentinel (returned by `GetAvatar` on a 304).
+- **Group & community management** (all require an explicit `@g.us` chat JID;
+  batch ops return 200 with a per-participant `Results` slice, never failing the
+  whole request on one bad member):
+  - `CreateGroup`, `LeaveGroup`, `UpdateGroupParticipants`
+    (add/remove/promote/demote), `SetGroupSettings`, `SetGroupName`,
+    `SetGroupTopic`.
+  - `SetGroupPhoto` (multipart JPEG) / `DeleteGroupPhoto`; `GetGroupInviteLink` /
+    `ResetGroupInviteLink`; `GetGroupInviteInfo` (preview by code — a revoked link
+    returns an error matching the new `ErrGone` (410) sentinel); `JoinGroup`;
+    `ListJoinRequests` / `ReviewJoinRequests` (approve/reject).
+  - Community: `LinkSubGroup` / `UnlinkSubGroup`, `ListSubGroups`,
+    `ListCommunityParticipants`.
+  - New `ErrGone` sentinel + `IsGone` helper (410).
+- **Opt-in admin module.** `NewAdminClient(opts...)` builds a separate,
+  operator-only client for the gateway's admin plane (kept off the tenant
+  `Client` so tenant code can't reach it). It defaults to the server ROOT
+  (`DefaultAdminBaseURL`, not `/api/v1`) and sends the admin secret — supplied via
+  `WithAdminSecret` (or `WithToken`) — as `Authorization: Bearer <secret>`.
+  Methods: `Sessions`, `Session(phone)` (404→`ErrNotFound`), `Live` (root
+  liveness, no secret), `Ready` (root readiness — returns the structured body for
+  both `ready`/200 and `not_ready`/503).
+
+### Fixed
+- Error responses now surface their message even when the gateway serializes the
+  Go field names `{"Status","Message"}` instead of the documented
+  `{"error","code"}` (older gateway builds) — previously the message was dropped.
+- `ParseWebhook` no longer drops the `message.failed` failure reason
+  (`OutgoingWebhookPayload.Error`) or the incoming `addressing_mode`.
+- Media-send retries with the same `Idempotency-Key` now build a byte-identical
+  request body (deterministic multipart boundary), so the gateway replays the
+  original response instead of rejecting the retry as a body mismatch (422).
+
 ## [0.6.0] - 2026-07-05
 
 ### Added

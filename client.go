@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -190,21 +191,54 @@ func (c *Client) Reconnect(ctx context.Context) error {
 // For group messages, use the group ID in the format "groupId@g.us".
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendText(ctx context.Context, msisdn, message string) (*SendMessageResponse, error) {
+func (c *Client) SendText(ctx context.Context, msisdn, message string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendMessageTextRequest{
-		Msisdn:  msisdn,
-		Message: message,
+		Chat:          cfg.chat,
+		Msisdn:        msisdn,
+		Message:       message,
+		ReplyToID:     cfg.replyToID,
+		ReplyToSender: cfg.replyToSender,
+		ReplyToText:   cfg.replyToText,
+		Mentions:      cfg.mentions,
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/text", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/text", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// writeSendContext writes the shared chat/reply/mentions multipart form fields
+// carried by every media send. mentions are written as repeated fields (one
+// "mentions" part per entry) because the gateway binds them to a []string;
+// comma-joining would be parsed as a single mention.
+func writeSendContext(w *multipart.Writer, cfg sendConfig) error {
+	fields := []struct{ name, value string }{
+		{"chat", cfg.chat},
+		{"reply_to_id", cfg.replyToID},
+		{"reply_to_sender", cfg.replyToSender},
+		{"reply_to_text", cfg.replyToText},
+	}
+	for _, f := range fields {
+		if f.value == "" {
+			continue
+		}
+		if err := w.WriteField(f.name, f.value); err != nil {
+			return fmt.Errorf("failed to write %s field: %w", f.name, err)
+		}
+	}
+	for _, m := range cfg.mentions {
+		if err := w.WriteField("mentions", m); err != nil {
+			return fmt.Errorf("failed to write mentions field: %w", err)
+		}
+	}
+	return nil
 }
 
 // SendImage sends an image message to the specified recipient.
@@ -222,18 +256,30 @@ func (c *Client) SendText(ctx context.Context, msisdn, message string) (*SendMes
 //	resp, err := client.SendImage(ctx, msisdn, file, "Check this out!", false)
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, caption string, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, caption string, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
+
 	// Build multipart form
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+
+	// Add chat/reply/mentions context
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 
 	// Add caption if provided
@@ -276,6 +322,7 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -308,21 +355,27 @@ func (c *Client) SendImage(ctx context.Context, msisdn string, image io.Reader, 
 // The name and address parameters are optional metadata for the location pin.
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, longitude float64, name, address string) (*SendMessageResponse, error) {
+func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, longitude float64, name, address string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendLocationMessageRequest{
-		Msisdn:    msisdn,
-		Latitude:  latitude,
-		Longitude: longitude,
-		Name:      name,
-		Address:   address,
+		Chat:          cfg.chat,
+		Msisdn:        msisdn,
+		Latitude:      latitude,
+		Longitude:     longitude,
+		Name:          name,
+		Address:       address,
+		ReplyToID:     cfg.replyToID,
+		ReplyToSender: cfg.replyToSender,
+		ReplyToText:   cfg.replyToText,
+		Mentions:      cfg.mentions,
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/location", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/location", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -335,20 +388,26 @@ func (c *Client) SendLocation(ctx context.Context, msisdn string, latitude, long
 // The selectableCount limits how many options a user can select (0 means no limit).
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options []string, selectableCount int) (*SendMessageResponse, error) {
+func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options []string, selectableCount int, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
 	reqBody := SendPollMessageRequest{
+		Chat:            cfg.chat,
 		Msisdn:          msisdn,
 		Question:        question,
 		Options:         options,
 		SelectableCount: selectableCount,
+		ReplyToID:       cfg.replyToID,
+		ReplyToSender:   cfg.replyToSender,
+		ReplyToText:     cfg.replyToText,
+		Mentions:        cfg.mentions,
 	}
 
 	var resp SendMessageResponse
-	if err := c.doRequest(ctx, http.MethodPost, "/message/poll", reqBody, &resp, true); err != nil {
+	if err := c.doRequest(ctx, http.MethodPost, "/message/poll", reqBody, &resp, true, cfg.headers()...); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -366,18 +425,30 @@ func (c *Client) SendPoll(ctx context.Context, msisdn, question string, options 
 //	resp, err := client.SendSticker(ctx, msisdn, file)
 //
 // Requires authentication (call Register or SetToken first).
-func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Reader) (*SendMessageResponse, error) {
+func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Reader, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
+
 	// Build multipart form
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	// Add msisdn field
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+
+	// Add chat/reply/mentions context
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 
 	// Add sticker file
@@ -406,6 +477,7 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -436,16 +508,26 @@ func (c *Client) SendSticker(ctx context.Context, msisdn string, sticker io.Read
 // The audio parameter is an io.Reader containing the audio file bytes.
 // If isPTT is true, WhatsApp renders the audio as a voice note bubble.
 // If isViewOnce is true, the media is sent as view-once.
-func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, isPTT, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, isPTT, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
+
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if isPTT {
 		if err := writer.WriteField("is_ptt", "true"); err != nil {
@@ -479,6 +561,7 @@ func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -506,16 +589,26 @@ func (c *Client) SendAudio(ctx context.Context, msisdn string, audio io.Reader, 
 // The video parameter is an io.Reader containing the video file bytes.
 // caption is optional. isGif toggles GIF-like rendering. isViewOnce controls
 // view-once behavior.
-func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, caption string, isGif, isViewOnce bool) (*SendMessageResponse, error) {
+func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, caption string, isGif, isViewOnce bool, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
+
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if caption != "" {
 		if err := writer.WriteField("caption", caption); err != nil {
@@ -554,6 +647,7 @@ func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, 
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -580,16 +674,26 @@ func (c *Client) SendVideo(ctx context.Context, msisdn string, video io.Reader, 
 //
 // fileName and caption are optional. When fileName is empty, the gateway uses
 // its own default naming.
-func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Reader, fileName, caption string) (*SendMessageResponse, error) {
+func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Reader, fileName, caption string, opts ...SendOption) (*SendMessageResponse, error) {
 	if err := c.checkAuth(); err != nil {
 		return nil, err
 	}
 
+	cfg := newSendConfig(opts)
+
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
+	if b, ok := cfg.multipartBoundary(); ok {
+		if err := writer.SetBoundary(b); err != nil {
+			return nil, fmt.Errorf("failed to set multipart boundary: %w", err)
+		}
+	}
 
 	if err := writer.WriteField("msisdn", msisdn); err != nil {
 		return nil, fmt.Errorf("failed to write msisdn field: %w", err)
+	}
+	if err := writeSendContext(writer, cfg); err != nil {
+		return nil, err
 	}
 	if fileName != "" {
 		if err := writer.WriteField("file_name", fileName); err != nil {
@@ -623,6 +727,7 @@ func (c *Client) SendDocument(ctx context.Context, msisdn string, document io.Re
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, cfg.headers())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -724,6 +829,524 @@ func (c *Client) CheckContact(ctx context.Context, msisdn string) (*ContactCheck
 
 	var resp ContactCheckResponse
 	path := "/contact/check?msisdn=" + url.QueryEscape(msisdn)
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListContacts returns a page of the account's locally-synced contacts. limit
+// (gateway default 100, max 500) and offset paginate the result. An empty
+// address book is not an error — this endpoint never 404s on empty.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListContacts(ctx context.Context, limit, offset int) (*ContactListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/contact/?limit=%d&offset=%d", limit, offset)
+	var resp ContactListResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetContactInfo returns a server-side profile lookup for one user: status text,
+// current picture id, verified business name, linked-device count, and lid.
+//
+// chat is the canonical recipient (a bare number, "@s.whatsapp.net", or "@lid").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetContactInfo(ctx context.Context, chat string) (*ContactInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/contact/info?chat=" + url.QueryEscape(chat)
+	var resp ContactInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetAvatar returns a chat's profile picture (user or group). preview requests
+// the low-res thumbnail instead of the full-resolution image.
+//
+// The returned AvatarResponse.ID doubles as an ETag. Pass it back on a later
+// call as the optional priorID to enable conditional fetching: if the picture is
+// unchanged the gateway replies 304 and this method returns ErrNotModified
+// (check with errors.Is(err, waga.ErrNotModified)). A chat with no picture
+// returns ErrNotFound (404); a hidden picture returns ErrForbidden (403).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetAvatar(ctx context.Context, chat string, preview bool, priorID ...string) (*AvatarResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/contact/avatar?chat=" + url.QueryEscape(chat)
+	if preview {
+		path += "&preview=true"
+	}
+
+	var headers []reqHeader
+	if len(priorID) > 0 && priorID[0] != "" {
+		headers = append(headers, reqHeader{"If-None-Match", `"` + priorID[0] + `"`})
+	}
+
+	var resp AvatarResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true, headers...); err != nil {
+		var se *SDKError
+		if errors.As(err, &se) && se.Code == http.StatusNotModified {
+			return nil, ErrNotModified
+		}
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListGroups returns the account's joined groups as lightweight summaries (no
+// participant roster; use GetGroupInfo for one group's full detail).
+//
+// This is a server-hitting read subject to a per-account budget; when the budget
+// is exhausted the gateway returns 429 (ErrRateLimited).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListGroups(ctx context.Context) (*GroupListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp GroupListResponse
+	if err := c.doRequest(ctx, http.MethodGet, "/group/", nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInfo returns a single group's full detail plus its participant roster.
+//
+// chat must be a group JID ("@g.us"). The account must be a member: a non-member
+// group returns ErrForbidden (403), an absent group returns ErrNotFound (404).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInfo(ctx context.Context, chat string) (*GroupInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/info?chat=" + url.QueryEscape(chat)
+	var resp GroupInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// MarkRead marks one or more messages in a chat as read (blue ticks).
+//
+// chat is the canonical recipient. sender is the message author's JID/number and
+// is required for group chats (pass "" for one-to-one chats).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) MarkRead(ctx context.Context, chat string, messageIDs []string, sender string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	reqBody := MarkReadRequest{
+		Chat:       chat,
+		MessageIDs: messageIDs,
+		Sender:     sender,
+	}
+
+	var resp SuccessResponse
+	return c.doRequest(ctx, http.MethodPost, "/message/read", reqBody, &resp, true)
+}
+
+// SendChatPresence sets the typing indicator in a chat. state must be one of
+// PresenceComposing ("typing…"), PresenceRecording ("recording audio…"), or
+// PresencePaused (cleared).
+//
+// chat is the canonical recipient.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SendChatPresence(ctx context.Context, chat, state string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	reqBody := ChatPresenceRequest{Chat: chat, State: state}
+
+	var resp SuccessResponse
+	return c.doRequest(ctx, http.MethodPost, "/chat/presence", reqBody, &resp, true)
+}
+
+// CreateGroup creates a group, or a community when req.IsCommunity is set. The
+// response carries the new group's info plus a per-participant Results slice
+// (invited/failed members are reported there, not as an error).
+//
+// Group/community management is gated server-side by GROUP_MANAGEMENT_ENABLED;
+// when disabled the whole mutation surface is unregistered (404).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) CreateGroup(ctx context.Context, req CreateGroupRequest) (*CreateGroupResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var resp CreateGroupResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/", req, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// LeaveGroup leaves a group. chat must be a group JID ("@g.us"). Allowed for
+// non-admins.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) LeaveGroup(ctx context.Context, chat string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+	}{chat}
+	return c.doRequest(ctx, http.MethodPost, "/group/leave", body, nil, true)
+}
+
+// UpdateGroupParticipants mutates a group's roster. action is one of "add",
+// "remove", "promote", or "demote". chat must be a group JID ("@g.us").
+//
+// Partial success is a 200: inspect the returned Results for each participant's
+// status ("ok", "invited" when a privacy-blocked add became an invite, or
+// "failed" with a Code). "add" is gated server-side by
+// GROUP_ADD_PARTICIPANTS_ENABLED (403 when disabled).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) UpdateGroupParticipants(ctx context.Context, chat, action string, participants []string) (*GroupParticipantsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat         string   `json:"chat"`
+		Action       string   `json:"action"`
+		Participants []string `json:"participants"`
+	}{chat, action, participants}
+
+	var resp GroupParticipantsResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/participants", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetGroupSettings toggles group-level settings. Pass a non-nil announce (only
+// admins can send) and/or locked (only admins can edit group info); at least one
+// must be supplied. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupSettings(ctx context.Context, chat string, announce, locked *bool) (*GroupSettingsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat     string `json:"chat"`
+		Announce *bool  `json:"announce,omitempty"`
+		Locked   *bool  `json:"locked,omitempty"`
+	}{chat, announce, locked}
+
+	var resp GroupSettingsResponse
+	if err := c.doRequest(ctx, http.MethodPatch, "/group/settings", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetGroupName sets a group's name (subject), max 25 characters. chat must be a
+// group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupName(ctx context.Context, chat, name string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+		Name string `json:"name"`
+	}{chat, name}
+	return c.doRequest(ctx, http.MethodPatch, "/group/name", body, nil, true)
+}
+
+// SetGroupTopic sets a group's topic (description), max 512 characters; an empty
+// topic clears it. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupTopic(ctx context.Context, chat, topic string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat  string `json:"chat"`
+		Topic string `json:"topic"`
+	}{chat, topic}
+	return c.doRequest(ctx, http.MethodPatch, "/group/topic", body, nil, true)
+}
+
+// SetGroupPhoto sets a group's photo from a JPEG stream. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) SetGroupPhoto(ctx context.Context, chat string, jpeg io.Reader) (*GroupPhotoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if err := writer.WriteField("chat", chat); err != nil {
+		return nil, fmt.Errorf("failed to write chat field: %w", err)
+	}
+	part, err := writer.CreateFormFile("photo", "photo.jpg")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create photo form file: %w", err)
+	}
+	if _, err := io.Copy(part, jpeg); err != nil {
+		return nil, fmt.Errorf("failed to copy photo data: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/group/photo", &buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.GetToken())
+	req.Header.Set("User-Agent", c.userAgent)
+	if traceID := TraceIDFromContext(ctx); traceID != "" {
+		req.Header.Set(TraceIDHeader, traceID)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(respBody, resp.StatusCode, resp.Header.Get(TraceIDHeader))
+	}
+
+	var result GroupPhotoResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	return &result, nil
+}
+
+// DeleteGroupPhoto removes a group's photo. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) DeleteGroupPhoto(ctx context.Context, chat string) (*GroupPhotoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/photo?chat=" + url.QueryEscape(chat)
+	var resp GroupPhotoResponse
+	if err := c.doRequest(ctx, http.MethodDelete, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInviteLink returns a group's admin invite link. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInviteLink(ctx context.Context, chat string) (*GroupInviteLinkResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/invite?chat=" + url.QueryEscape(chat)
+	var resp GroupInviteLinkResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ResetGroupInviteLink revokes a group's current invite link and returns a
+// freshly generated one. chat must be a group JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ResetGroupInviteLink(ctx context.Context, chat string) (*GroupInviteLinkResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat string `json:"chat"`
+	}{chat}
+	var resp GroupInviteLinkResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/invite/reset", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// GetGroupInviteInfo previews the group behind an invite code without joining.
+// code accepts a full chat.whatsapp.com link or a bare code. A revoked link
+// returns an error matching ErrGone (410) — check with errors.Is(err, waga.ErrGone).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) GetGroupInviteInfo(ctx context.Context, code string) (*GroupInfoResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/invite/info?code=" + url.QueryEscape(code)
+	var resp GroupInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// JoinGroup joins a group by invite code (a full chat.whatsapp.com link or a
+// bare code). This mass-join vector is gated server-side by
+// GROUP_JOIN_VIA_LINK_ENABLED (403 when disabled).
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) JoinGroup(ctx context.Context, code string) (*JoinGroupResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Code string `json:"code"`
+	}{code}
+	var resp JoinGroupResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/join", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListJoinRequests lists a group's pending join requests. chat must be a group
+// JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListJoinRequests(ctx context.Context, chat string) (*GroupJoinRequestsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/group/requests?chat=" + url.QueryEscape(chat)
+	var resp GroupJoinRequestsResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ReviewJoinRequests approves or rejects pending join requests. action is
+// "approve" or "reject". chat must be a group JID ("@g.us").
+//
+// Partial success is a 200: inspect the returned Results for each participant.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ReviewJoinRequests(ctx context.Context, chat, action string, participants []string) (*GroupJoinRequestsActionResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	body := struct {
+		Chat         string   `json:"chat"`
+		Action       string   `json:"action"`
+		Participants []string `json:"participants"`
+	}{chat, action, participants}
+
+	var resp GroupJoinRequestsActionResponse
+	if err := c.doRequest(ctx, http.MethodPost, "/group/requests", body, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// LinkSubGroup links a sub-group under a parent community. chat is the parent
+// community JID and childJID is the sub-group JID (both "@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) LinkSubGroup(ctx context.Context, chat, childJID string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	body := struct {
+		Chat     string `json:"chat"`
+		ChildJID string `json:"child_jid"`
+	}{chat, childJID}
+	return c.doRequest(ctx, http.MethodPost, "/community/subgroups", body, nil, true)
+}
+
+// UnlinkSubGroup unlinks a sub-group from its parent community. chat is the
+// parent community JID and childJID is the sub-group JID (both "@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) UnlinkSubGroup(ctx context.Context, chat, childJID string) error {
+	if err := c.checkAuth(); err != nil {
+		return err
+	}
+
+	path := "/community/subgroups?chat=" + url.QueryEscape(chat) + "&child=" + url.QueryEscape(childJID)
+	return c.doRequest(ctx, http.MethodDelete, path, nil, nil, true)
+}
+
+// ListSubGroups lists the sub-groups linked under a community. chat must be the
+// community JID ("@g.us"). An empty list is not an error.
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListSubGroups(ctx context.Context, chat string) (*SubGroupListResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/community/subgroups?chat=" + url.QueryEscape(chat)
+	var resp SubGroupListResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListCommunityParticipants lists every participant across a community's linked
+// groups. chat must be the community JID ("@g.us").
+//
+// Requires authentication (call Register or SetToken first).
+func (c *Client) ListCommunityParticipants(ctx context.Context, chat string) (*CommunityParticipantsResponse, error) {
+	if err := c.checkAuth(); err != nil {
+		return nil, err
+	}
+
+	path := "/community/participants?chat=" + url.QueryEscape(chat)
+	var resp CommunityParticipantsResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
 		return nil, err
 	}
@@ -835,7 +1458,7 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 }
 
 // doRequest performs an HTTP request and unmarshals the response
-func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}, requireAuth bool) error {
+func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}, requireAuth bool, headers ...reqHeader) error {
 	var reqBody io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -856,6 +1479,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	if traceID := TraceIDFromContext(ctx); traceID != "" {
 		req.Header.Set(TraceIDHeader, traceID)
 	}
+	setHeaders(req, headers)
 
 	if requireAuth {
 		token := c.GetToken()
@@ -894,6 +1518,13 @@ func (c *Client) checkAuth() error {
 		return ErrNotAuthenticated
 	}
 	return nil
+}
+
+// setHeaders applies extra request headers (e.g. Idempotency-Key) to req.
+func setHeaders(req *http.Request, headers []reqHeader) {
+	for _, h := range headers {
+		req.Header.Set(h.key, h.value)
+	}
 }
 
 // Additional response types

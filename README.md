@@ -152,6 +152,44 @@ if err != nil {
 
 ## Sending Messages
 
+### Send Options
+
+Every `SendXxx` method takes a trailing variadic of `SendOption`s for canonical
+chat addressing, quoted replies, @-mentions, and send idempotency. Existing call
+sites keep working unchanged — options are purely additive.
+
+```go
+resp, err := client.SendText(ctx, recipient, "Hi team!",
+    waga.WithChat("120363000000000000@g.us"),        // canonical recipient (see below)
+    waga.WithReply("MSG_ID", senderJID, "quoted text"), // quote an existing message
+    waga.WithMentions("6281111111111", "6282222222222"), // @-tag participants
+    waga.WithIdempotencyKey("order-4711-notify"),       // safe retry (see Idempotency)
+)
+```
+
+The same options work on the media sends (`SendImage`/`SendAudio`/`SendVideo`/
+`SendDocument`/`SendSticker`) and `SendLocation`/`SendPoll`.
+
+#### Chat Addressing
+
+`WithChat` sets the **canonical** recipient — a bare number, a user JID
+(`@s.whatsapp.net`), a group JID (`@g.us`), or a `@lid`. It takes precedence over
+the positional recipient argument, which the gateway treats as the deprecated
+`msisdn` alias. Send responses echo the resolved recipient in `resp.Chat`:
+
+```go
+resp, _ := client.SendText(ctx, "", "Hi!", waga.WithChat("120363000000000000@g.us"))
+fmt.Println("delivered to:", resp.Chat)
+```
+
+#### Idempotency
+
+`WithIdempotencyKey` sends an `Idempotency-Key` header. Reusing the same key
+replays the gateway's original response (HTTP 200); an in-flight duplicate
+returns `409` (`waga.ErrConflict`) and the same key with a **different** request
+body returns `422` (`SDKError.Code == 422`). The header is only sent when a key
+is provided.
+
 ### Text Message
 
 ```go
@@ -329,6 +367,204 @@ for _, msg := range resp.Messages {
 
 Note: media URLs are not populated by this endpoint; use webhooks for fetchable media.
 
+## Contacts & Groups
+
+All of these accept the canonical `chat` (a bare number, `@s.whatsapp.net`,
+`@g.us`, or `@lid`).
+
+### List Contacts
+
+Locally-synced contacts, paginated (`limit` defaults to 100, max 500). Never
+errors on an empty address book:
+
+```go
+page, err := client.ListContacts(ctx, 100, 0) // limit, offset
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("%d of %d contacts\n", page.Count, page.Total)
+for _, ct := range page.Contacts {
+    fmt.Println(ct.JID, ct.PushName)
+}
+```
+
+### Contact Info
+
+Server-side profile lookup (status, picture id, verified name, device count, lid):
+
+```go
+info, err := client.GetContactInfo(ctx, "6281234567890")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(info.Status, info.DeviceCount, info.LID)
+```
+
+### Avatar (with conditional fetch)
+
+Profile picture for a user *or* group. `preview` requests the thumbnail. The
+returned `ID` doubles as an ETag — pass it back as the optional `priorID` to skip
+re-downloading when unchanged:
+
+```go
+av, err := client.GetAvatar(ctx, "6281234567890", false)
+if err != nil {
+    if errors.Is(err, waga.ErrNotFound) {
+        // no profile picture
+    } else if errors.Is(err, waga.ErrForbidden) {
+        // picture hidden by privacy settings
+    }
+    return
+}
+fmt.Println(av.URL, av.ID)
+
+// Later — only re-fetch if the picture changed:
+av2, err := client.GetAvatar(ctx, "6281234567890", false, av.ID)
+if errors.Is(err, waga.ErrNotModified) {
+    // unchanged; keep the cached av
+}
+```
+
+### List Groups
+
+Joined-group summaries. This is a budgeted server read — a `429` maps to
+`ErrRateLimited`:
+
+```go
+groups, err := client.ListGroups(ctx)
+if errors.Is(err, waga.ErrRateLimited) {
+    // read budget exhausted; back off
+}
+for _, g := range groups.Groups {
+    fmt.Println(g.JID, g.Name, g.ParticipantCount)
+}
+```
+
+### Group Info
+
+Full detail plus participant roster. Requires a group JID; `ErrForbidden` if the
+account is not a member, `ErrNotFound` if the group is absent:
+
+```go
+g, err := client.GetGroupInfo(ctx, "120363000000000000@g.us")
+if err != nil {
+    log.Fatal(err)
+}
+for _, p := range g.Participants {
+    fmt.Println(p.JID, p.IsAdmin, p.IsSuperAdmin)
+}
+```
+
+## Read Receipts & Presence
+
+### Mark Messages as Read
+
+Sends blue ticks. For group chats, pass the message author as `sender`:
+
+```go
+err := client.MarkRead(ctx, "120363000000000000@g.us",
+    []string{"MSG_ID_1", "MSG_ID_2"},
+    "6281234567890@s.whatsapp.net") // sender (author); "" for one-to-one chats
+```
+
+### Typing Indicator
+
+```go
+err := client.SendChatPresence(ctx, recipient, waga.PresenceComposing) // typing…
+// ... waga.PresenceRecording (voice note) / waga.PresencePaused (cleared)
+```
+
+## Group & Community Management
+
+Every group/community method requires an explicit group JID (`@g.us`); a bare
+number or user JID is rejected with `400`. These endpoints are gated server-side
+by `GROUP_MANAGEMENT_ENABLED` (the whole mutation surface returns `404` when the
+gateway disables it). Batch operations return `200` with a per-participant
+`Results` slice — a single bad member is reported there, not as an overall error.
+
+```go
+// Create a group (or a community with IsCommunity: true).
+grp, err := client.CreateGroup(ctx, waga.CreateGroupRequest{
+    Name:         "Project X",
+    Participants: []string{"6281111111111", "6282222222222"},
+})
+
+// Roster mutations: add | remove | promote | demote.
+res, err := client.UpdateGroupParticipants(ctx, grp.GroupJID, "add", []string{"6283333333333"})
+for _, r := range res.Results {
+    fmt.Println(r.JID, r.Status) // ok | invited (privacy-blocked add) | failed
+}
+
+// Settings, name, topic.
+announce := true
+client.SetGroupSettings(ctx, grp.GroupJID, &announce, nil) // ≥1 non-nil flag
+client.SetGroupName(ctx, grp.GroupJID, "Project X — Q3")   // ≤25 chars
+client.SetGroupTopic(ctx, grp.GroupJID, "")                // ≤512; empty clears
+
+// Photo (multipart JPEG).
+f, _ := os.Open("group.jpg")
+defer f.Close()
+client.SetGroupPhoto(ctx, grp.GroupJID, f)
+client.DeleteGroupPhoto(ctx, grp.GroupJID)
+
+// Invite links.
+link, _ := client.GetGroupInviteLink(ctx, grp.GroupJID)
+client.ResetGroupInviteLink(ctx, grp.GroupJID) // revoke + regenerate
+
+// Preview a link without joining (a revoked link matches ErrGone).
+info, err := client.GetGroupInviteInfo(ctx, "https://chat.whatsapp.com/XXXX")
+if errors.Is(err, waga.ErrGone) {
+    // link revoked
+}
+client.JoinGroup(ctx, "https://chat.whatsapp.com/XXXX") // gated by GROUP_JOIN_VIA_LINK_ENABLED
+
+// Pending join requests.
+reqs, _ := client.ListJoinRequests(ctx, grp.GroupJID)
+client.ReviewJoinRequests(ctx, grp.GroupJID, "approve", []string{"6284444444444"}) // approve | reject
+
+// Communities.
+client.LinkSubGroup(ctx, communityJID, subGroupJID)
+client.UnlinkSubGroup(ctx, communityJID, subGroupJID)
+subs, _ := client.ListSubGroups(ctx, communityJID)
+members, _ := client.ListCommunityParticipants(ctx, communityJID)
+```
+
+Read-only group/community methods (`ListGroups`, `GetGroupInfo`, `ListSubGroups`,
+`ListCommunityParticipants`) stay available even when mutations are disabled.
+
+## Admin Module
+
+The gateway's operator-only admin plane is exposed as a **separate, opt-in
+client** so tenant code can't accidentally reach it. It is served at the server
+**root** (not under `/api/v1`) and is bearer-gated by the gateway's
+`ADMIN_API_SECRET` (the plane returns `404` when that secret is unset).
+
+Construct it with `NewAdminClient`, pointing `WithBaseURL` at the gateway origin
+and passing the admin secret via `WithAdminSecret`:
+
+```go
+admin := waga.NewAdminClient(
+    waga.WithBaseURL("https://gateway.example.com"), // server ROOT, no /api/v1
+    waga.WithAdminSecret(os.Getenv("ADMIN_API_SECRET")),
+)
+
+// Per-instance session inventory (masked phones, honest states, hostname).
+inv, err := admin.Sessions(ctx)
+for _, s := range inv.Sessions {
+    fmt.Println(s.PhoneMasked, s.State)
+}
+
+// One account (ErrNotFound if unknown).
+one, err := admin.Session(ctx, "6281234567890")
+
+// Root health probes (no admin secret required).
+live, _ := admin.Live(ctx)   // always 200 for a running process
+ready, err := admin.Ready(ctx)
+if err == nil && ready.Status != "ready" {
+    // not_ready (HTTP 503): DB or queue down — the body is still returned
+}
+```
+
 ## Job Status
 
 When the gateway runs in queue mode, send methods return a job ID instead of a
@@ -440,6 +676,52 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### Unified Dispatch with ParseWebhook
+
+When a single endpoint receives every webhook type, `ParseWebhook` verifies the
+signature and dispatches on the `event` field into a discriminated
+`WebhookEvent`. Exactly one of `Incoming`, `Outgoing`, or `Session` is non-nil.
+The narrower `ParseIncomingWebhook` / `ParseOutgoingWebhook` remain available.
+
+```go
+ev, err := verifier.ParseWebhook(body, signature)
+if err != nil {
+    if errors.Is(err, waga.ErrUnknownWebhookEvent) {
+        http.Error(w, "unknown event", http.StatusBadRequest)
+        return
+    }
+    // errors.Is(err, waga.ErrInvalidSignature) for a bad signature
+    http.Error(w, "invalid webhook", http.StatusBadRequest)
+    return
+}
+
+switch ev.Event {
+case waga.WebhookEventMessageIncoming:
+    fmt.Printf("from %s: %s\n", ev.Incoming.From, ev.Incoming.Text)
+case waga.WebhookEventMessageSent, waga.WebhookEventMessageQueued, waga.WebhookEventMessageFailed:
+    fmt.Printf("%s: %s\n", ev.Outgoing.Event, ev.Outgoing.MessageId)
+case waga.WebhookEventSessionBanned:
+    fmt.Printf("account %s banned for %ds\n", ev.Session.PhoneNumber, ev.Session.ExpiresIn)
+default: // other session.* lifecycle events
+    fmt.Printf("session event %s for %s\n", ev.Event, ev.Session.JID)
+}
+```
+
+#### Session Events
+
+Besides the four message events, the gateway emits six `session.*` lifecycle
+events, decoded into `SessionEvent` (flat envelope `Event`/`PhoneNumber`/`JID`/
+`Timestamp` plus event-specific extras):
+
+| Event | Extras |
+|-------|--------|
+| `WebhookEventSessionLoggedOut` | `OnConnect`, `Reason`, `ReasonText` |
+| `WebhookEventSessionBanned` | `Code`, `ReasonText`, `ExpiresIn` |
+| `WebhookEventSessionConnectFailure` | `Reason`, `ReasonText`, `Message` |
+| `WebhookEventSessionConnected` | envelope only |
+| `WebhookEventSessionDisconnected` | envelope only |
+| `WebhookEventSessionReplaced` | envelope only |
+
 ### Webhook Payload Types
 
 #### Incoming Message
@@ -507,9 +789,12 @@ if err != nil {
 | `ErrForbidden` | 403 | No permission for this action |
 | `ErrNotFound` | 404 | Resource not found |
 | `ErrConflict` | 409 | Resource conflict |
+| `ErrGone` | 410 | Resource gone (e.g. revoked group invite link) |
+| `ErrNotModified` | 304 | `GetAvatar` — picture unchanged (conditional fetch) |
 | `ErrRateLimited` | 429 | Too many requests |
 | `ErrInternalServer` | 500 | Server error |
 | `ErrInvalidSignature` | - | Webhook signature verification failed |
+| `ErrUnknownWebhookEvent` | - | `ParseWebhook` got an unrecognized event |
 | `ErrNotAuthenticated` | - | Client has no token set |
 
 ## Helper Functions
