@@ -1530,10 +1530,18 @@ func setHeaders(req *http.Request, headers []reqHeader) {
 // Additional response types
 
 // LoginStatus represents the response from GetLoginStatus.
-// It indicates whether the WhatsApp session is currently authenticated.
+// The booleans describe the WhatsApp device-pairing/ban state, not API-token
+// validity (a successful call already implies the token was accepted).
 type LoginStatus struct {
-	// Authenticated is true if the session is active and authenticated
+	// LoggedIn is true when the WhatsApp device is linked and connected.
+	// Prefer this over the deprecated Authenticated alias.
+	LoggedIn bool `json:"logged_in"`
+	// Authenticated is a deprecated alias for LoggedIn, kept for back-compat.
 	Authenticated bool `json:"authenticated"`
+	// Banned is true when the account is under a WhatsApp temporary ban.
+	Banned bool `json:"banned"`
+	// BanExpiresAt is the RFC3339 time the temporary ban lifts; empty unless Banned.
+	BanExpiresAt string `json:"ban_expires_at,omitempty"`
 }
 
 // SuccessResponse represents a generic success response from API operations.
