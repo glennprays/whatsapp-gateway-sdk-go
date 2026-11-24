@@ -22,8 +22,14 @@ type RegisterResponse struct {
 type LoginQrResponse struct {
 	// QrCode is the base64-encoded QR code image or HTML img tag
 	QrCode string `json:"qr_code"`
-	// ExpiresIn is the number of seconds until the QR code expires
+	// ExpiresIn is the number of seconds until the QR code expires.
+	// Kept for back-compat: the pair-code response genuinely uses
+	// expires_in, but the gateway's QR endpoints send timeout below.
 	ExpiresIn int `json:"expires_in"`
+	// Timeout is the number of seconds until the QR code expires, as
+	// reported by the gateway. The gateway's /login/qr_code/json response
+	// uses this field name (not expires_in), so ExpiresIn is typically 0.
+	Timeout int `json:"timeout"`
 }
 
 // LoginPairResponse represents the response when requesting a pair code for login.
