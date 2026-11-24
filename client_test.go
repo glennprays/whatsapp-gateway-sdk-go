@@ -299,14 +299,15 @@ func TestWithUserAgent(t *testing.T) {
 // Authentication & Session Management Tests
 // ============================================================================
 
-// TestGetQRCode_JSONFormat tests successful QR code retrieval with JSON format
+// TestGetQRCode_JSONFormat tests successful QR code retrieval with JSON format,
+// using the gateway's real response shape (timeout, not expires_in).
 func TestGetQRCode_JSONFormat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/login/qr_code/json" {
 			t.Errorf("expected path /api/v1/login/qr_code/json, got %s", r.URL.Path)
 		}
 
-		resp := LoginQrResponse{QrCode: "base64qrdata", ExpiresIn: 60}
+		resp := LoginQrResponse{QrCode: "base64qrdata", Timeout: 60}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -324,8 +325,36 @@ func TestGetQRCode_JSONFormat(t *testing.T) {
 	if qr.QrCode != "base64qrdata" {
 		t.Errorf("expected qr code 'base64qrdata', got '%s'", qr.QrCode)
 	}
-	if qr.ExpiresIn != 60 {
-		t.Errorf("expected expires in 60, got %d", qr.ExpiresIn)
+	if qr.Timeout != 60 {
+		t.Errorf("expected timeout 60, got %d", qr.Timeout)
+	}
+}
+
+// TestGetQRCode_BothFieldsBind proves both spellings decode independently:
+// timeout (what the gateway sends on QR endpoints) and expires_in (kept for
+// back-compat with pair-code responses and older gateways).
+func TestGetQRCode_BothFieldsBind(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := LoginQrResponse{QrCode: "x", Timeout: 45, ExpiresIn: 30}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL+"/api/v1"),
+		WithToken("test-token"),
+	)
+
+	qr, err := client.GetQRCode(context.Background(), "json")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if qr.Timeout != 45 {
+		t.Errorf("expected timeout 45, got %d", qr.Timeout)
+	}
+	if qr.ExpiresIn != 30 {
+		t.Errorf("expected expires_in 30, got %d", qr.ExpiresIn)
 	}
 }
 
